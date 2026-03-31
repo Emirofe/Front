@@ -2,6 +2,7 @@ import { useState, useMemo } from "react";
 import { useSearchParams, Link } from "react-router";
 import { ChevronLeft, ChevronRight, SlidersHorizontal, X } from "lucide-react";
 import { products, categories } from "../data/mock-data";
+import { getProductPrice, matchesCatalogSearch } from "../data/catalog-helpers";
 import { ProductCard } from "../components/product-card";
 import { Navbar } from "../components/layout/navbar";
 import { Footer } from "../components/layout/footer";
@@ -28,12 +29,16 @@ export function HomePage() {
   const [searchParams] = useSearchParams();
   const [currentBanner, setCurrentBanner] = useState(0);
   const [sortBy, setSortBy] = useState("relevancia");
-  const [priceRange, setPriceRange] = useState<[number, number]>([0, 2000]);
   const [minRating, setMinRating] = useState(0);
   const [showFilters, setShowFilters] = useState(false);
 
   const categoryFilter = searchParams.get("categoria");
   const searchFilter = searchParams.get("buscar");
+  const maxCatalogPrice = useMemo(
+    () => Math.max(...products.map((product) => getProductPrice(product)), 0),
+    []
+  );
+  const [priceRange, setPriceRange] = useState<[number, number]>([0, maxCatalogPrice]);
 
   const filteredProducts = useMemo(() => {
     let result = [...products];
@@ -42,16 +47,13 @@ export function HomePage() {
       result = result.filter((p) => p.category === categoryFilter);
     }
     if (searchFilter) {
-      const q = searchFilter.toLowerCase();
-      result = result.filter(
-        (p) =>
-          p.name.toLowerCase().includes(q) ||
-          p.description.toLowerCase().includes(q) ||
-          p.category.toLowerCase().includes(q)
-      );
+      result = result.filter((product) => matchesCatalogSearch(product, searchFilter));
     }
     result = result.filter(
-      (p) => p.price >= priceRange[0] && p.price <= priceRange[1]
+      (product) => {
+        const price = getProductPrice(product);
+        return price >= priceRange[0] && price <= priceRange[1];
+      }
     );
     if (minRating > 0) {
       result = result.filter((p) => p.rating >= minRating);
@@ -59,10 +61,10 @@ export function HomePage() {
 
     switch (sortBy) {
       case "precio-asc":
-        result.sort((a, b) => a.price - b.price);
+        result.sort((a, b) => getProductPrice(a) - getProductPrice(b));
         break;
       case "precio-desc":
-        result.sort((a, b) => b.price - a.price);
+        result.sort((a, b) => getProductPrice(b) - getProductPrice(a));
         break;
       case "rating":
         result.sort((a, b) => b.rating - a.rating);
@@ -248,7 +250,7 @@ export function HomePage() {
                   <input
                     type="number"
                     value={priceRange[0]}
-                    onChange={(e) => setPriceRange([Number(e.target.value), priceRange[1]])}
+                    onChange={(e) => setPriceRange([Math.max(0, Number(e.target.value)), priceRange[1]])}
                     className="w-24 px-3 py-2 border border-border rounded-lg bg-input-background"
                     style={{ fontSize: 14 }}
                     placeholder="Min"
@@ -257,7 +259,7 @@ export function HomePage() {
                   <input
                     type="number"
                     value={priceRange[1]}
-                    onChange={(e) => setPriceRange([priceRange[0], Number(e.target.value)])}
+                    onChange={(e) => setPriceRange([priceRange[0], Math.min(maxCatalogPrice, Number(e.target.value) || maxCatalogPrice)])}
                     className="w-24 px-3 py-2 border border-border rounded-lg bg-input-background"
                     style={{ fontSize: 14 }}
                     placeholder="Max"
@@ -283,7 +285,7 @@ export function HomePage() {
               <div className="flex items-end">
                 <button
                   onClick={() => {
-                    setPriceRange([0, 2000]);
+                    setPriceRange([0, maxCatalogPrice]);
                     setMinRating(0);
                     setSortBy("relevancia");
                   }}

@@ -1,5 +1,6 @@
 export interface Product {
   id: string;
+  dbId?: number;
   name: string;
   description: string;
   price: number;
@@ -20,15 +21,61 @@ export interface Product {
   availability?: string;
   location?: string;
   status?: "Aprobado" | "En revision" | "Rechazado";
+  isActive?: boolean;
+  stockTotal?: number;
+  categoryIds?: number[];
+  imageEntries?: ProductImageEntry[];
+  pricing?: {
+    current?: number;
+    original?: number;
+    currency?: string;
+    base?: number;
+  };
+  media?: {
+    cover?: string;
+    gallery?: Array<string | { url: string; isPrimary?: boolean }>;
+  };
+  business?: {
+    id?: string;
+    commercialName?: string;
+    rating?: number;
+    location?: BusinessLocation;
+  };
+  reviewSummary?: {
+    average?: number;
+    total?: number;
+    items?: Review[];
+  };
+}
+
+export interface BusinessLocation {
+  id?: string;
+  address: string;
+  city?: string;
+  state?: string;
+  country?: string;
+  postalCode?: string;
+  lat?: number;
+  lng?: number;
 }
 
 export interface Review {
   id: string;
+  dbId?: number;
   userId: string;
   userName: string;
   rating: number;
   comment: string;
   date: string;
+  verifiedPurchase?: boolean;
+  targetType?: "producto" | "servicio";
+}
+
+export interface ProductImageEntry {
+  id: string;
+  url: string;
+  isPrimary?: boolean;
+  sortOrder?: number;
 }
 
 export interface CartItem {
@@ -60,6 +107,8 @@ export interface User {
   status: "Activo" | "Bloqueado";
   phone?: string;
   avatar?: string;
+  isActive?: boolean;
+  deletedAt?: string | null;
 }
 
 export interface Report {
@@ -90,7 +139,12 @@ export interface Address {
   city: string;
   state: string;
   zip: string;
+  country?: string;
   isDefault: boolean;
+  geoLocation?: {
+    lat: number;
+    lng: number;
+  };
 }
 
 export interface PaymentMethod {
@@ -108,6 +162,10 @@ export interface BusinessProfile {
   businessName: string;
   rfc: string;
   address: string;
+  city?: string;
+  state?: string;
+  country?: string;
+  postalCode?: string;
   lat: number;
   lng: number;
   logo?: string;
@@ -525,13 +583,13 @@ export const mockOrders: Order[] = [
 ];
 
 export const mockUsers: User[] = [
-  { id: "u1", name: "Maria Garcia", email: "maria@correo.com", role: "comprador", registrationDate: "2025-11-15", status: "Activo", phone: "55 1234 5678" },
-  { id: "u2", name: "Carlos Rodriguez", email: "carlos@correo.com", role: "comprador", registrationDate: "2025-12-01", status: "Activo", phone: "33 9876 5432" },
-  { id: "u3", name: "Ana Lopez", email: "ana@correo.com", role: "comprador", registrationDate: "2026-01-10", status: "Activo" },
-  { id: "s1", name: "FiestaMax Store", email: "fiestamax@correo.com", role: "vendedor", registrationDate: "2025-10-01", status: "Activo" },
-  { id: "s2", name: "EventosPro Store", email: "eventospro@correo.com", role: "vendedor", registrationDate: "2025-09-15", status: "Activo" },
-  { id: "s3", name: "PinatasMX Store", email: "pinatasmx@correo.com", role: "vendedor", registrationDate: "2025-11-20", status: "Bloqueado" },
-  { id: "a1", name: "Admin Principal", email: "admin@marketplace.com", role: "admin", registrationDate: "2025-08-01", status: "Activo" },
+  { id: "u1", name: "Maria Garcia", email: "maria@correo.com", role: "comprador", registrationDate: "2025-11-15", status: "Activo", phone: "55 1234 5678", isActive: true, deletedAt: null },
+  { id: "u2", name: "Carlos Rodriguez", email: "carlos@correo.com", role: "comprador", registrationDate: "2025-12-01", status: "Activo", phone: "33 9876 5432", isActive: true, deletedAt: null },
+  { id: "u3", name: "Ana Lopez", email: "ana@correo.com", role: "comprador", registrationDate: "2026-01-10", status: "Activo", isActive: true, deletedAt: null },
+  { id: "s1", name: "FiestaMax Store", email: "fiestamax@correo.com", role: "vendedor", registrationDate: "2025-10-01", status: "Activo", isActive: true, deletedAt: null },
+  { id: "s2", name: "EventosPro Store", email: "eventospro@correo.com", role: "vendedor", registrationDate: "2025-09-15", status: "Activo", isActive: true, deletedAt: null },
+  { id: "s3", name: "PinatasMX Store", email: "pinatasmx@correo.com", role: "vendedor", registrationDate: "2025-11-20", status: "Bloqueado", isActive: false, deletedAt: null },
+  { id: "a1", name: "Admin Principal", email: "admin@marketplace.com", role: "admin", registrationDate: "2025-08-01", status: "Activo", isActive: true, deletedAt: null },
 ];
 
 export const mockReports: Report[] = [
@@ -560,8 +618,8 @@ export const mockBundles: Bundle[] = [
 ];
 
 export const mockAddresses: Address[] = [
-  { id: "a1", label: "Casa", street: "Av. Reforma 123", city: "Ciudad de Mexico", state: "CDMX", zip: "06600", isDefault: true },
-  { id: "a2", label: "Oficina", street: "Calle Palmas 456, Piso 3", city: "Ciudad de Mexico", state: "CDMX", zip: "11000", isDefault: false },
+  { id: "a1", label: "Casa", street: "Av. Reforma 123", city: "Ciudad de Mexico", state: "CDMX", zip: "06600", country: "Mexico", isDefault: true, geoLocation: { lat: 19.4326, lng: -99.1332 } },
+  { id: "a2", label: "Oficina", street: "Calle Palmas 456, Piso 3", city: "Ciudad de Mexico", state: "CDMX", zip: "11000", country: "Mexico", isDefault: false, geoLocation: { lat: 19.4241, lng: -99.1717 } },
 ];
 
 export const mockPaymentMethods: PaymentMethod[] = [
@@ -574,6 +632,99 @@ export const mockDiscounts: Discount[] = [
 ];
 
 export const mockBusinesses: BusinessProfile[] = [
-  { id: "biz1", sellerId: "s1", businessName: "Fiestas Maximas SA de CV", rfc: "FIMA890101QW1", address: "Calle Falsa 123", lat: 19.4326, lng: -99.1332 },
-  { id: "biz2", sellerId: "s2", businessName: "Eventos Profesionales SC", rfc: "EVPR780202ER2", address: "Av Patriotismo 456", lat: 19.3957, lng: -99.1769 }
+  {
+    id: "biz1",
+    sellerId: "s1",
+    businessName: "Fiestas Maximas SA de CV",
+    rfc: "FIMA890101QW1",
+    address: "Calle Falsa 123",
+    city: "Ciudad de Mexico",
+    state: "CDMX",
+    country: "Mexico",
+    postalCode: "06000",
+    lat: 19.4326,
+    lng: -99.1332
+  },
+  {
+    id: "biz2",
+    sellerId: "s2",
+    businessName: "Eventos Profesionales SC",
+    rfc: "EVPR780202ER2",
+    address: "Av Patriotismo 456",
+    city: "Ciudad de Mexico",
+    state: "CDMX",
+    country: "Mexico",
+    postalCode: "03800",
+    lat: 19.3957,
+    lng: -99.1769
+  }
 ];
+
+function getBusinessBySellerId(sellerId: string) {
+  return mockBusinesses.find((business) => business.sellerId === sellerId);
+}
+
+function createImageEntries(product: Product): ProductImageEntry[] {
+  return product.images.map((url, index) => ({
+    id: `${product.id}-img-${index + 1}`,
+    url,
+    isPrimary: index === 0,
+    sortOrder: index,
+  }));
+}
+
+function enrichReview(review: Review, productType: Product["type"]): Review {
+  return {
+    ...review,
+    dbId: Number(review.id.replace(/\D/g, "")) || undefined,
+    verifiedPurchase: review.verifiedPurchase ?? true,
+    targetType: productType ?? "producto",
+  };
+}
+
+products.forEach((product, index) => {
+  const business = getBusinessBySellerId(product.sellerId);
+  const enrichedReviews = product.reviews.map((review) => enrichReview(review, product.type));
+
+  product.dbId = index + 1;
+  product.isActive = product.status !== "Rechazado";
+  product.stockTotal = product.type === "servicio" ? undefined : product.stock;
+  product.categoryIds = [index + 1];
+  product.imageEntries = createImageEntries(product);
+  product.pricing = {
+    current: product.price,
+    original: product.originalPrice,
+    currency: "MXN",
+    base: product.type === "servicio" ? product.price : undefined,
+  };
+  product.media = {
+    cover: product.images[0] ?? product.image,
+    gallery: createImageEntries(product).map((image) => ({
+      url: image.url,
+      isPrimary: image.isPrimary,
+    })),
+  };
+  product.business = business
+    ? {
+        id: business.id,
+        commercialName: business.businessName,
+        rating: product.sellerRating,
+        location: {
+          id: business.id,
+          address: business.address,
+          city: business.city,
+          state: business.state,
+          country: business.country,
+          postalCode: business.postalCode,
+          lat: business.lat,
+          lng: business.lng,
+        },
+      }
+    : product.business;
+  product.reviewSummary = {
+    average: product.rating,
+    total: product.reviewCount,
+    items: enrichedReviews,
+  };
+  product.reviews = enrichedReviews;
+});

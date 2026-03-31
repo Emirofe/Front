@@ -5,15 +5,28 @@ import {
   ShoppingCart,
   Minus,
   Plus,
-  Star,
   Store,
   ChevronRight,
   Clock,
   Calendar,
   MapPin,
   Package,
+  Building2,
 } from "lucide-react";
 import { products, mockBundles } from "../data/mock-data";
+import {
+  getProductImages,
+  getProductLocation,
+  getProductOriginalPrice,
+  getProductPrice,
+  getProductPrimaryImage,
+  getProductRating,
+  getProductReviewCount,
+  getProductReviews,
+  getProductSellerName,
+  getProductSellerRating,
+  getProductStock,
+} from "../data/catalog-helpers";
 import { StarRating } from "../components/star-rating";
 import { useStore } from "../context/store-context";
 import { Navbar } from "../components/layout/navbar";
@@ -36,12 +49,8 @@ export function ProductDetailPage() {
   const [reviewRating, setReviewRating] = useState(0);
   const [reviewComment, setReviewComment] = useState("");
   const [showReviewForm, setShowReviewForm] = useState(false);
-  
-  // States para Servicios
   const [selectedDate, setSelectedDate] = useState<string>("");
   const [selectedTime, setSelectedTime] = useState<string>("");
-
-  const isService = product?.type === "servicio";
 
   if (!product) {
     return (
@@ -58,11 +67,23 @@ export function ProductDetailPage() {
     );
   }
 
+  const isService = product.type === "servicio";
   const inWishlist = isInWishlist(product.id);
-  const sellerBundles = mockBundles.filter((b) => b.sellerId === product.sellerId);
+  const sellerBundles = mockBundles.filter((bundle) => bundle.sellerId === product.sellerId);
   const relatedProducts = products
-    .filter((p) => p.category === product.category && p.id !== product.id)
+    .filter((item) => item.category === product.category && item.id !== product.id)
     .slice(0, 4);
+  const productImages = getProductImages(product);
+  const primaryImage = getProductPrimaryImage(product);
+  const productPrice = getProductPrice(product);
+  const originalPrice = getProductOriginalPrice(product);
+  const productReviews = getProductReviews(product);
+  const reviewCount = getProductReviewCount(product);
+  const productRating = getProductRating(product);
+  const sellerName = getProductSellerName(product);
+  const sellerRating = getProductSellerRating(product);
+  const stock = getProductStock(product);
+  const businessLocation = getProductLocation(product);
 
   const handleAddToCart = () => {
     if (isService) {
@@ -72,18 +93,21 @@ export function ProductDetailPage() {
       }
       addToCart(product, 1, selectedDate, selectedTime);
       toast.success(`${product.name} agendado para el ${selectedDate} a las ${selectedTime}`);
-    } else {
-      if (product.stock === 0) {
-        toast.error("Este producto esta agotado");
-        return;
-      }
-      if (quantity > product.stock) {
-        toast.error(`Solo hay ${product.stock} unidades disponibles`);
-        return;
-      }
-      addToCart(product, quantity);
-      toast.success(`${product.name} (x${quantity}) agregado al carrito`);
+      return;
     }
+
+    if (stock === 0) {
+      toast.error("Este producto esta agotado");
+      return;
+    }
+
+    if (quantity > stock) {
+      toast.error(`Solo hay ${stock} unidades disponibles`);
+      return;
+    }
+
+    addToCart(product, quantity);
+    toast.success(`${product.name} (x${quantity}) agregado al carrito`);
   };
 
   const handleToggleWishlist = () => {
@@ -116,7 +140,6 @@ export function ProductDetailPage() {
     <div className="min-h-screen flex flex-col bg-gray-50">
       <Navbar />
 
-      {/* Breadcrumb */}
       <div className="max-w-7xl mx-auto px-4 py-3 flex items-center gap-2 text-muted-foreground" style={{ fontSize: 13 }}>
         <Link to="/" className="hover:text-primary">Inicio</Link>
         <ChevronRight size={14} />
@@ -130,67 +153,64 @@ export function ProductDetailPage() {
       <main className="max-w-7xl mx-auto px-4 pb-12">
         <div className="bg-white rounded-2xl border border-border overflow-hidden">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-0">
-            {/* Image Gallery */}
             <div className="p-6 lg:p-8">
               <div className="aspect-square rounded-xl overflow-hidden bg-gray-50 mb-4">
                 <img
-                  src={product.images[selectedImage] || product.image}
+                  src={productImages[selectedImage] || primaryImage}
                   alt={product.name}
                   className="w-full h-full object-cover"
                 />
               </div>
-              {product.images.length > 1 && (
-                <div className="flex gap-3">
-                  {product.images.map((img, idx) => (
+              {productImages.length > 1 && (
+                <div className="flex gap-3 overflow-x-auto">
+                  {productImages.map((image, index) => (
                     <button
-                      key={idx}
-                      onClick={() => setSelectedImage(idx)}
-                      className={`w-20 h-20 rounded-lg overflow-hidden border-2 transition-colors ${
-                        idx === selectedImage ? "border-primary" : "border-border"
+                      key={`${product.id}-image-${index}`}
+                      onClick={() => setSelectedImage(index)}
+                      className={`w-20 h-20 rounded-lg overflow-hidden border-2 transition-colors shrink-0 ${
+                        index === selectedImage ? "border-primary" : "border-border"
                       }`}
                     >
-                      <img src={img} alt="" className="w-full h-full object-cover" />
+                      <img src={image} alt={`${product.name} ${index + 1}`} className="w-full h-full object-cover" />
                     </button>
                   ))}
                 </div>
               )}
             </div>
 
-            {/* Product Info */}
             <div className="p-6 lg:p-8 lg:border-l border-border">
               <div className="flex items-center gap-2 mb-2">
-                <Link to={`/?buscar=${product.sellerName}`} className="text-primary hover:underline" style={{ fontSize: 14 }}>
+                <Link to={`/?buscar=${sellerName}`} className="text-primary hover:underline" style={{ fontSize: 14 }}>
                   <Store size={14} className="inline mr-1" />
-                  {product.sellerName}
+                  {sellerName}
                 </Link>
                 <span className="text-muted-foreground" style={{ fontSize: 13 }}>
-                  ({product.sellerRating} estrellas)
+                  ({sellerRating.toFixed(1)} estrellas)
                 </span>
               </div>
 
               <h1 className="mb-3" style={{ fontSize: 24, fontWeight: 600 }}>{product.name}</h1>
 
               <div className="flex items-center gap-3 mb-4">
-                <StarRating rating={product.rating} size={18} showCount count={product.reviewCount} />
+                <StarRating rating={productRating} size={18} showCount count={reviewCount} />
               </div>
 
               <div className="flex items-baseline gap-3 mb-4">
                 <span className="text-primary" style={{ fontSize: 32, fontWeight: 700 }}>
-                  ${product.price.toFixed(2)}
+                  ${productPrice.toFixed(2)}
                 </span>
-                {product.originalPrice && (
+                {originalPrice && (
                   <>
                     <span className="text-muted-foreground line-through" style={{ fontSize: 18 }}>
-                      ${product.originalPrice.toFixed(2)}
+                      ${originalPrice.toFixed(2)}
                     </span>
                     <span className="bg-red-100 text-red-600 px-2 py-0.5 rounded" style={{ fontSize: 13, fontWeight: 600 }}>
-                      -{Math.round(((product.originalPrice - product.price) / product.originalPrice) * 100)}%
+                      -{Math.round(((originalPrice - productPrice) / originalPrice) * 100)}%
                     </span>
                   </>
                 )}
               </div>
 
-              {/* Stock / Duration */}
               <div className="mb-6">
                 {isService ? (
                   <span className="text-primary flex items-center gap-2" style={{ fontSize: 14, fontWeight: 500 }}>
@@ -198,13 +218,13 @@ export function ProductDetailPage() {
                   </span>
                 ) : (
                   <>
-                    {product.stock > 10 ? (
+                    {stock > 10 ? (
                       <span className="text-green-600" style={{ fontSize: 14, fontWeight: 500 }}>
                         En stock
                       </span>
-                    ) : product.stock > 0 ? (
+                    ) : stock > 0 ? (
                       <span className="text-amber-600" style={{ fontSize: 14, fontWeight: 500 }}>
-                        Quedan solo {product.stock} unidades
+                        Quedan solo {stock} unidades
                       </span>
                     ) : (
                       <span className="text-red-600" style={{ fontSize: 14, fontWeight: 500 }}>
@@ -215,7 +235,6 @@ export function ProductDetailPage() {
                 )}
               </div>
 
-              {/* Quantity or Agenda */}
               {isService ? (
                 <div className="mb-6 space-y-4 bg-gray-50 p-4 rounded-xl border border-border">
                   <h3 style={{ fontSize: 16, fontWeight: 600 }}>Agendar Servicio</h3>
@@ -224,8 +243,8 @@ export function ProductDetailPage() {
                       <label className="block mb-1.5 flex items-center gap-2" style={{ fontSize: 13, fontWeight: 500 }}>
                         <Calendar size={14} className="text-primary" /> Fecha
                       </label>
-                      <input 
-                        type="date" 
+                      <input
+                        type="date"
                         min={new Date().toISOString().split("T")[0]}
                         value={selectedDate}
                         onChange={(e) => setSelectedDate(e.target.value)}
@@ -236,7 +255,7 @@ export function ProductDetailPage() {
                       <label className="block mb-1.5 flex items-center gap-2" style={{ fontSize: 13, fontWeight: 500 }}>
                         <Clock size={14} className="text-primary" /> Horario
                       </label>
-                      <select 
+                      <select
                         value={selectedTime}
                         onChange={(e) => setSelectedTime(e.target.value)}
                         className="w-full px-3 py-2 rounded-lg border border-border bg-white outline-none focus:border-primary"
@@ -256,7 +275,7 @@ export function ProductDetailPage() {
                   <span style={{ fontSize: 14 }}>Cantidad:</span>
                   <div className="flex items-center border border-border rounded-lg">
                     <button
-                      onClick={() => setQuantity((q) => Math.max(1, q - 1))}
+                      onClick={() => setQuantity((current) => Math.max(1, current - 1))}
                       className="p-2 hover:bg-gray-50 transition-colors"
                     >
                       <Minus size={18} />
@@ -265,8 +284,9 @@ export function ProductDetailPage() {
                       {quantity}
                     </span>
                     <button
-                      onClick={() => setQuantity((q) => Math.min(product.stock, q + 1))}
+                      onClick={() => setQuantity((current) => Math.min(stock || 1, current + 1))}
                       className="p-2 hover:bg-gray-50 transition-colors"
+                      disabled={stock === 0}
                     >
                       <Plus size={18} />
                     </button>
@@ -274,11 +294,10 @@ export function ProductDetailPage() {
                 </div>
               )}
 
-              {/* Actions */}
               <div className="flex gap-3 mb-6">
                 <button
                   onClick={handleAddToCart}
-                  disabled={!isService && product.stock === 0}
+                  disabled={!isService && stock === 0}
                   className="flex-1 flex items-center justify-center gap-2 bg-primary text-white py-3.5 rounded-xl hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   style={{ fontSize: 16, fontWeight: 600 }}
                 >
@@ -297,7 +316,6 @@ export function ProductDetailPage() {
                 </button>
               </div>
 
-              {/* Delivery info / Geolocation */}
               {isService ? (
                 <div className="bg-primary/5 rounded-xl p-4 flex items-center gap-3">
                   <MapPin size={20} className="text-primary shrink-0" />
@@ -311,7 +329,9 @@ export function ProductDetailPage() {
                   <Package size={20} className="text-primary shrink-0" />
                   <div>
                     <p style={{ fontSize: 14, fontWeight: 500 }}>Envio estimado: 3-5 dias habiles</p>
-                    <p className="text-muted-foreground" style={{ fontSize: 13 }}>Contexto: Fiestas</p>
+                    <p className="text-muted-foreground" style={{ fontSize: 13 }}>
+                      Ubicacion del negocio: {businessLocation?.city || "Sin ciudad registrada"}
+                    </p>
                   </div>
                 </div>
               )}
@@ -319,7 +339,6 @@ export function ProductDetailPage() {
           </div>
         </div>
 
-        {/* Tabs */}
         <div className="bg-white rounded-2xl border border-border mt-6 overflow-hidden">
           <div className="flex border-b border-border">
             {(["descripcion", "resenas", "vendedor"] as const).map((tab) => (
@@ -333,7 +352,7 @@ export function ProductDetailPage() {
                 }`}
                 style={{ fontSize: 15, fontWeight: 500 }}
               >
-                {tab === "resenas" ? `Resenas (${product.reviews.length})` : tab === "vendedor" ? "Info del Vendedor" : "Descripcion"}
+                {tab === "resenas" ? `Resenas (${reviewCount})` : tab === "vendedor" ? "Info del Vendedor" : "Descripcion"}
               </button>
             ))}
           </div>
@@ -345,8 +364,13 @@ export function ProductDetailPage() {
             )}
             {activeTab === "resenas" && (
               <div>
-                <div className="flex items-center justify-between mb-6">
-                  <h3 style={{ fontSize: 18, fontWeight: 600 }}>Resenas de Clientes</h3>
+                <div className="flex items-center justify-between mb-6 gap-4 flex-wrap">
+                  <div>
+                    <h3 style={{ fontSize: 18, fontWeight: 600 }}>Resenas de Clientes</h3>
+                    <p className="text-muted-foreground mt-1" style={{ fontSize: 13 }}>
+                      Calificacion promedio: {productRating.toFixed(1)} de 5
+                    </p>
+                  </div>
                   <button
                     onClick={() => setShowReviewForm(!showReviewForm)}
                     className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors"
@@ -384,11 +408,11 @@ export function ProductDetailPage() {
                   </form>
                 )}
 
-                {product.reviews.length === 0 ? (
+                {productReviews.length === 0 ? (
                   <p className="text-muted-foreground" style={{ fontSize: 14 }}>Aun no hay resenas para este producto.</p>
                 ) : (
                   <div className="space-y-4">
-                    {product.reviews.map((review) => (
+                    {productReviews.map((review) => (
                       <div key={review.id} className="border-b border-border pb-4 last:border-0">
                         <div className="flex items-center gap-3 mb-2">
                           <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary" style={{ fontSize: 14, fontWeight: 600 }}>
@@ -408,23 +432,46 @@ export function ProductDetailPage() {
               </div>
             )}
             {activeTab === "vendedor" && (
-              <div className="flex items-start gap-4">
-                <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center text-primary shrink-0">
-                  <Store size={28} />
+              <div className="space-y-6">
+                <div className="flex items-start gap-4">
+                  <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center text-primary shrink-0">
+                    <Store size={28} />
+                  </div>
+                  <div>
+                    <h3 style={{ fontSize: 18, fontWeight: 600 }}>{sellerName}</h3>
+                    <StarRating rating={sellerRating} size={16} showCount count={reviewCount} />
+                    <p className="text-muted-foreground mt-2" style={{ fontSize: 14 }}>
+                      Vendedor verificado en TultiMarket. La vista de detalle usa la misma agrupacion de negocio, resenas e imagenes que consume el catalogo.
+                    </p>
+                  </div>
                 </div>
+
                 <div>
-                  <h3 style={{ fontSize: 18, fontWeight: 600 }}>{product.sellerName}</h3>
-                  <StarRating rating={product.sellerRating} size={16} showCount count={product.reviewCount} />
-                  <p className="text-muted-foreground mt-2" style={{ fontSize: 14 }}>
-                    Vendedor verificado en TultiMarket. Especialista en articulos para fiestas y eventos.
-                  </p>
+                  <div className="flex items-center gap-2 mb-3">
+                    <Building2 size={18} className="text-primary" />
+                    <h4 style={{ fontSize: 16, fontWeight: 600 }}>Ubicacion del Negocio</h4>
+                  </div>
+                  {!businessLocation ? (
+                    <p className="text-muted-foreground" style={{ fontSize: 14 }}>
+                      Este vendedor aun no tiene una direccion matriz registrada.
+                    </p>
+                  ) : (
+                    <div className="rounded-xl border border-border p-4 bg-gray-50">
+                      <p style={{ fontSize: 15, fontWeight: 600 }}>{sellerName}</p>
+                      <p className="text-muted-foreground mt-1" style={{ fontSize: 14 }}>{businessLocation.address}</p>
+                      {([businessLocation.city, businessLocation.state, businessLocation.country].filter(Boolean).length > 0) && (
+                        <p className="text-muted-foreground mt-1" style={{ fontSize: 13 }}>
+                          {[businessLocation.city, businessLocation.state, businessLocation.country].filter(Boolean).join(", ")}
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             )}
           </div>
         </div>
 
-        {/* Bundles */}
         {sellerBundles.length > 0 && (
           <section className="mt-8">
             <h2 className="mb-4" style={{ fontSize: 20, fontWeight: 600 }}>
@@ -435,12 +482,12 @@ export function ProductDetailPage() {
                 <div key={bundle.id} className="bg-white rounded-xl border border-border p-6">
                   <h3 className="mb-3" style={{ fontSize: 16, fontWeight: 600 }}>{bundle.name}</h3>
                   <div className="space-y-2 mb-4">
-                    {bundle.products.map((p) => (
-                      <div key={p.id} className="flex items-center gap-3">
-                        <img src={p.image} alt={p.name} className="w-12 h-12 rounded object-cover" />
+                    {bundle.products.map((bundleProduct) => (
+                      <div key={bundleProduct.id} className="flex items-center gap-3">
+                        <img src={getProductPrimaryImage(bundleProduct)} alt={bundleProduct.name} className="w-12 h-12 rounded object-cover" />
                         <div className="flex-1 min-w-0">
-                          <p className="truncate" style={{ fontSize: 14 }}>{p.name}</p>
-                          <p className="text-muted-foreground" style={{ fontSize: 13 }}>${p.price.toFixed(2)}</p>
+                          <p className="truncate" style={{ fontSize: 14 }}>{bundleProduct.name}</p>
+                          <p className="text-muted-foreground" style={{ fontSize: 13 }}>${getProductPrice(bundleProduct).toFixed(2)}</p>
                         </div>
                       </div>
                     ))}
@@ -458,7 +505,7 @@ export function ProductDetailPage() {
                   </div>
                   <button
                     onClick={() => {
-                      bundle.products.forEach((p) => addToCart(p));
+                      bundle.products.forEach((bundleProduct) => addToCart(bundleProduct));
                       toast.success("Paquete agregado al carrito");
                     }}
                     className="w-full bg-primary text-white py-2.5 rounded-lg hover:bg-primary/90 transition-colors"
@@ -472,25 +519,30 @@ export function ProductDetailPage() {
           </section>
         )}
 
-        {/* Related Products */}
         {relatedProducts.length > 0 && (
           <section className="mt-8">
             <h2 className="mb-4" style={{ fontSize: 20, fontWeight: 600 }}>
               Productos Similares
             </h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              {relatedProducts.map((p) => (
+              {relatedProducts.map((relatedProduct) => (
                 <Link
-                  key={p.id}
-                  to={`/producto/${p.id}`}
+                  key={relatedProduct.id}
+                  to={`/producto/${relatedProduct.id}`}
                   className="bg-white rounded-xl border border-border overflow-hidden hover:shadow-md transition-all group"
                 >
                   <div className="aspect-square bg-gray-50">
-                    <img src={p.image} alt={p.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                    <img
+                      src={getProductPrimaryImage(relatedProduct)}
+                      alt={relatedProduct.name}
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                    />
                   </div>
                   <div className="p-3">
-                    <p className="truncate" style={{ fontSize: 14 }}>{p.name}</p>
-                    <p className="text-primary mt-1" style={{ fontSize: 16, fontWeight: 600 }}>${p.price.toFixed(2)}</p>
+                    <p className="truncate" style={{ fontSize: 14 }}>{relatedProduct.name}</p>
+                    <p className="text-primary mt-1" style={{ fontSize: 16, fontWeight: 600 }}>
+                      ${getProductPrice(relatedProduct).toFixed(2)}
+                    </p>
                   </div>
                 </Link>
               ))}

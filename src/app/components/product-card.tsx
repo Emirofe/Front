@@ -1,6 +1,15 @@
 import { Heart, ShoppingCart } from "lucide-react";
 import { Link } from "react-router";
 import { Product } from "../data/mock-data";
+import {
+  getProductOriginalPrice,
+  getProductPrimaryImage,
+  getProductPrice,
+  getProductRating,
+  getProductReviewCount,
+  getProductSellerName,
+  getProductStock,
+} from "../data/catalog-helpers";
 import { StarRating } from "./star-rating";
 import { useStore } from "../context/store-context";
 import { toast } from "sonner";
@@ -12,10 +21,21 @@ interface ProductCardProps {
 export function ProductCard({ product }: ProductCardProps) {
   const { addToCart, addToWishlist, removeFromWishlist, isInWishlist } = useStore();
   const inWishlist = isInWishlist(product.id);
+  const productPrice = getProductPrice(product);
+  const originalPrice = getProductOriginalPrice(product);
+  const productImage = getProductPrimaryImage(product);
+  const productRating = getProductRating(product);
+  const reviewCount = getProductReviewCount(product);
+  const sellerName = getProductSellerName(product);
+  const stock = getProductStock(product);
 
   const handleAddToCart = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    if (product.type !== "servicio" && stock === 0) {
+      toast.error("Este producto esta agotado");
+      return;
+    }
     addToCart(product);
     toast.success(`${product.name} agregado al carrito`);
   };
@@ -39,7 +59,7 @@ export function ProductCard({ product }: ProductCardProps) {
     >
       <div className="relative overflow-hidden aspect-square bg-gray-50">
         <img
-          src={product.image}
+          src={productImage}
           alt={product.name}
           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
         />
@@ -51,34 +71,34 @@ export function ProductCard({ product }: ProductCardProps) {
         >
           <Heart size={18} className={inWishlist ? "fill-current" : ""} />
         </button>
-        {product.originalPrice && (
+        {originalPrice && (
           <div className="absolute top-3 left-3 bg-red-500 text-white px-2 py-0.5 rounded-md" style={{ fontSize: 12 }}>
-            -{Math.round(((product.originalPrice - product.price) / product.originalPrice) * 100)}%
+            -{Math.round(((originalPrice - productPrice) / originalPrice) * 100)}%
           </div>
         )}
-        {product.stock < 10 && product.stock > 0 && (
+        {stock < 10 && stock > 0 && (
           <div className="absolute bottom-3 left-3 bg-amber-500 text-white px-2 py-0.5 rounded-md" style={{ fontSize: 12 }}>
-            Quedan {product.stock}
+            Quedan {stock}
           </div>
         )}
       </div>
       <div className="p-4 flex flex-col flex-1">
         <p className="text-muted-foreground mb-1" style={{ fontSize: 12 }}>
-          {product.sellerName}
+          {sellerName}
         </p>
         <h3 className="mb-2 line-clamp-2 group-hover:text-primary transition-colors" style={{ fontSize: 14 }}>
           {product.name}
         </h3>
         <div className="mb-2">
-          <StarRating rating={product.rating} size={14} showCount count={product.reviewCount} />
+          <StarRating rating={productRating} size={14} showCount count={reviewCount} />
         </div>
         <div className="flex items-baseline gap-2 mb-3 mt-auto">
           <span className="text-primary" style={{ fontSize: 20, fontWeight: 700 }}>
-            ${product.price.toFixed(2)}
+            ${productPrice.toFixed(2)}
           </span>
-          {product.originalPrice && (
+          {originalPrice && (
             <span className="text-muted-foreground line-through" style={{ fontSize: 13 }}>
-              ${product.originalPrice.toFixed(2)}
+              ${originalPrice.toFixed(2)}
             </span>
           )}
         </div>
