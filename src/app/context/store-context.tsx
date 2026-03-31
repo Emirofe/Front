@@ -81,13 +81,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       );
       
       if (existing) {
+        // Cap at product stock for physical products
+        const maxQty = !isService ? product.stock : Infinity;
+        const newQty = Math.min(existing.quantity + quantity, maxQty);
         return prev.map((item) =>
           item.product.id === product.id && (!isService || (item.selectedDate === selectedDate && item.selectedTime === selectedTime))
-            ? { ...item, quantity: item.quantity + quantity }
+            ? { ...item, quantity: newQty }
             : item
         );
       }
-      return [...prev, { product, quantity, selectedDate, selectedTime }];
+      // Cap initial quantity at stock
+      const cappedQty = !isService ? Math.min(quantity, product.stock) : quantity;
+      return [...prev, { product, quantity: cappedQty, selectedDate, selectedTime }];
     });
   }, []);
 

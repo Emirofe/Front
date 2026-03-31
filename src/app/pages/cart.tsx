@@ -3,6 +3,7 @@ import { Minus, Plus, Trash2, ShoppingBag, Tag } from "lucide-react";
 import { useStore } from "../context/store-context";
 import { Navbar } from "../components/layout/navbar";
 import { Footer } from "../components/layout/footer";
+import { toast } from "sonner";
 
 export function CartPage() {
   const { cart, updateCartQuantity, removeFromCart, getCartTotal } = useStore();
@@ -80,7 +81,13 @@ export function CartPage() {
                             {item.quantity}
                           </span>
                           <button
-                            onClick={() => updateCartQuantity(item.product.id, item.quantity + 1)}
+                            onClick={() => {
+                              if (item.quantity >= item.product.stock) {
+                                toast.error(`Solo hay ${item.product.stock} unidades disponibles`);
+                                return;
+                              }
+                              updateCartQuantity(item.product.id, item.quantity + 1);
+                            }}
                             className="p-2 hover:bg-gray-50 transition-colors"
                           >
                             <Plus size={16} />

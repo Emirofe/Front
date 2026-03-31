@@ -73,6 +73,14 @@ export function ProductDetailPage() {
       addToCart(product, 1, selectedDate, selectedTime);
       toast.success(`${product.name} agendado para el ${selectedDate} a las ${selectedTime}`);
     } else {
+      if (product.stock === 0) {
+        toast.error("Este producto esta agotado");
+        return;
+      }
+      if (quantity > product.stock) {
+        toast.error(`Solo hay ${product.stock} unidades disponibles`);
+        return;
+      }
       addToCart(product, quantity);
       toast.success(`${product.name} (x${quantity}) agregado al carrito`);
     }
@@ -92,6 +100,10 @@ export function ProductDetailPage() {
     e.preventDefault();
     if (reviewRating === 0) {
       toast.error("Selecciona una calificacion");
+      return;
+    }
+    if (!reviewComment.trim() || reviewComment.trim().length < 10) {
+      toast.error("El comentario debe tener al menos 10 caracteres");
       return;
     }
     toast.success("Resena enviada exitosamente");
