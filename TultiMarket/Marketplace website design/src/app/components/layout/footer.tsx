@@ -1,7 +1,17 @@
+import { useState, useEffect } from "react";
 import { Link } from "react-router";
 import { Store } from "lucide-react";
+import { getCategoriasApi } from "../../api/api-client";
 
 export function Footer() {
+  const [categories, setCategories] = useState<{ id: string; name: string }[]>([]);
+
+  useEffect(() => {
+    getCategoriasApi()
+      .then((cats) => setCategories(cats))
+      .catch(() => setCategories([]));
+  }, []);
+
   return (
     <footer className="bg-[#121E2B] text-white/80">
       <div className="max-w-7xl mx-auto px-4 py-10">
@@ -18,9 +28,9 @@ export function Footer() {
           <div>
             <h4 className="text-white mb-3" style={{ fontSize: 16, fontWeight: 600 }}>Categorias</h4>
             <div className="space-y-2">
-              {["Cumpleanos", "Bodas", "Baby Shower", "Graduacion", "Halloween", "Navidad"].map((cat) => (
-                <Link key={cat} to={`/?categoria=${cat.toLowerCase().replace(/ /g, "-")}`} className="block hover:text-amber-400 transition-colors" style={{ fontSize: 14 }}>
-                  {cat}
+              {categories.map((cat) => (
+                <Link key={cat.id} to={`/?categoria=${cat.id}`} className="block hover:text-amber-400 transition-colors" style={{ fontSize: 14 }}>
+                  {cat.name}
                 </Link>
               ))}
             </div>

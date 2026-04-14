@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useParams, Link } from "react-router";
 import {
   Heart,
@@ -12,8 +12,10 @@ import {
   Calendar,
   MapPin,
   Package,
+  Loader2,
 } from "lucide-react";
-import { products, mockBundles } from "../data/mock-data";
+import { products as mockProducts, mockBundles, type Product } from "../data/mock-data";
+import { getProductoDetalleApi, getServicioDetalleApi } from "../api/api-client";
 import { StarRating } from "../components/star-rating";
 import { useStore } from "../context/store-context";
 import { Navbar } from "../components/layout/navbar";
@@ -22,7 +24,6 @@ import { toast } from "sonner";
 
 export function ProductDetailPage() {
   const { id } = useParams();
-  const product = products.find((p) => p.id === id);
   const {
     addToCart,
     addToWishlist,
@@ -30,6 +31,8 @@ export function ProductDetailPage() {
     isInWishlist,
   } = useStore();
 
+  const [product, setProduct] = useState<Product | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
   const [selectedImage, setSelectedImage] = useState(0);
   const [quantity, setQuantity] = useState(1);
   const [activeTab, setActiveTab] = useState<"descripcion" | "resenas" | "vendedor">("descripcion");
@@ -41,7 +44,46 @@ export function ProductDetailPage() {
   const [selectedDate, setSelectedDate] = useState<string>("");
   const [selectedTime, setSelectedTime] = useState<string>("");
 
+  // ─── Cargar producto SOLO del backend (fiel a la BD) ──────────────────────
+  useEffect(() => {
+    if (!id) {
+      setIsLoading(false);
+      return;
+    }
+
+    const numericId = Number(id);
+    if (isNaN(numericId) || numericId <= 0) {
+      // ID no válido
+      setProduct(null);
+      setIsLoading(false);
+      return;
+    }
+
+    // Buscar en el backend: primero como producto, luego como servicio
+    setIsLoading(true);
+    getProductoDetalleApi(numericId)
+      .then((p) => setProduct(p))
+      .catch(() => {
+        return getServicioDetalleApi(numericId)
+          .then((s) => setProduct(s))
+          .catch(() => setProduct(null));
+      })
+      .finally(() => setIsLoading(false));
+  }, [id]);
+
   const isService = product?.type === "servicio";
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex flex-col">
+        <Navbar />
+        <div className="flex-1 flex items-center justify-center">
+          <Loader2 className="animate-spin text-primary" size={40} />
+        </div>
+        <Footer />
+      </div>
+    );
+  }
 
   if (!product) {
     return (
@@ -60,7 +102,7 @@ export function ProductDetailPage() {
 
   const inWishlist = isInWishlist(product.id);
   const sellerBundles = mockBundles.filter((b) => b.sellerId === product.sellerId);
-  const relatedProducts = products
+  const relatedProducts = mockProducts
     .filter((p) => p.category === product.category && p.id !== product.id)
     .slice(0, 4);
 

@@ -10,25 +10,33 @@ export function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [showForgotModal, setShowForgotModal] = useState(false);
   const [forgotEmail, setForgotEmail] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const { login, currentUser } = useStore();
   const navigate = useNavigate();
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email || !password) {
       toast.error("Por favor completa todos los campos");
       return;
     }
-    const loggedInUser = login(email, password);
-    if (!loggedInUser) {
-      toast.error("Credenciales invalidas");
-      return;
+    setIsSubmitting(true);
+    try {
+      const loggedInUser = await login(email, password);
+      if (!loggedInUser) {
+        toast.error("Credenciales invalidas. Verifica tu correo y contraseña.");
+        return;
+      }
+      toast.success("Sesion iniciada correctamente");
+      if (loggedInUser.role === "vendedor") navigate("/vendedor/productos");
+      else if (loggedInUser.role === "admin") navigate("/admin/usuarios");
+      else navigate("/");
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : "Error al iniciar sesion";
+      toast.error(msg);
+    } finally {
+      setIsSubmitting(false);
     }
-    
-    toast.success("Sesion iniciada correctamente");
-    if (loggedInUser.role === "vendedor") navigate("/vendedor/productos");
-    else if (loggedInUser.role === "admin") navigate("/admin/usuarios");
-    else navigate("/");
   };
 
   return (
@@ -94,10 +102,11 @@ export function LoginPage() {
 
             <button
               type="submit"
-              className="w-full bg-primary text-white py-3.5 rounded-xl hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20"
+              disabled={isSubmitting}
+              className="w-full bg-primary text-white py-3.5 rounded-xl hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20 disabled:opacity-60 disabled:cursor-not-allowed"
               style={{ fontSize: 16, fontWeight: 600 }}
             >
-              Iniciar Sesion
+              {isSubmitting ? "Iniciando sesion..." : "Iniciar Sesion"}
             </button>
           </form>
 

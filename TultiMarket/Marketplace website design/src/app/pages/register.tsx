@@ -12,13 +12,9 @@ export function RegisterPage() {
   const [role, setRole] = useState("comprador");
   const [showPassword, setShowPassword] = useState(false);
 
-  // Business Fields for Sellers
-  const [businessName, setBusinessName] = useState("");
-  const [rfc, setRfc] = useState("");
-  const [businessAddress, setBusinessAddress] = useState("");
-
   // Inline error states
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const { register } = useStore();
   const navigate = useNavigate();
@@ -45,7 +41,7 @@ export function RegisterPage() {
   const strength = getPasswordStrength(password);
 
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const newErrors: Record<string, string> = {};
 
@@ -58,16 +54,6 @@ export function RegisterPage() {
     if (!confirmPassword) newErrors.confirmPassword = "Confirma tu contrasena";
     else if (password !== confirmPassword) newErrors.confirmPassword = "Las contrasenas no coinciden";
 
-    if (role === "vendedor") {
-      if (!businessName.trim()) newErrors.businessName = "El nombre del negocio es obligatorio";
-      if (!rfc.trim()) newErrors.rfc = "El RFC es obligatorio";
-      else {
-        const rfcRegex = /^[A-Z0-9]{12,13}$/i;
-        if (!rfcRegex.test(rfc)) newErrors.rfc = "El RFC debe tener 12 o 13 caracteres alfanumericos";
-      }
-      if (!businessAddress.trim()) newErrors.businessAddress = "La direccion fiscal es obligatoria";
-    }
-
     if (email === "existente@correo.com") newErrors.email = "Este correo ya esta registrado";
 
     if (Object.keys(newErrors).length > 0) {
@@ -76,9 +62,22 @@ export function RegisterPage() {
       return;
     }
 
-    register(name, email, password, role);
-    toast.success("Cuenta creada exitosamente");
-    navigate("/");
+    setIsSubmitting(true);
+    try {
+      const ok = await register(name, email, password, role);
+      if (!ok) {
+        toast.error("Error al crear la cuenta. Intenta con otro correo.");
+        return;
+      }
+      toast.success("Cuenta creada exitosamente");
+      if (role === "vendedor") navigate("/vendedor/productos");
+      else navigate("/");
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : "Error al registrar";
+      toast.error(msg);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -219,55 +218,13 @@ export function RegisterPage() {
               </div>
             </div>
 
-            {role === "vendedor" && (
-              <div className="space-y-4 pt-4 border-t border-border mt-4">
-                <h3 style={{ fontSize: 16, fontWeight: 600 }}>Datos del Negocio</h3>
-                <div>
-                  <label className="block mb-1.5" style={{ fontSize: 13 }}>Nombre del Negocio</label>
-                  <input
-                    type="text"
-                    value={businessName}
-                    onChange={(e) => { setBusinessName(e.target.value); clearError("businessName"); }}
-                    placeholder="Ej. Eventos Tultitlan"
-                    className={`w-full px-4 py-3 rounded-lg border ${errors.businessName ? "border-red-500 bg-red-50/50" : "border-border bg-gray-50"} focus:border-primary outline-none`}
-                    style={{ fontSize: 14 }}
-                  />
-                  {errors.businessName && <p className="text-red-500 mt-1" style={{ fontSize: 12 }}>{errors.businessName}</p>}
-                </div>
-                <div>
-                  <label className="block mb-1.5" style={{ fontSize: 13 }}>RFC del Negocio</label>
-                  <input
-                    type="text"
-                    value={rfc}
-                    onChange={(e) => { setRfc(e.target.value); clearError("rfc"); }}
-                    placeholder="RFC de 12-13 caracteres"
-                    className={`w-full px-4 py-3 rounded-lg border ${errors.rfc ? "border-red-500 bg-red-50/50" : "border-border bg-gray-50"} focus:border-primary outline-none uppercase`}
-                    style={{ fontSize: 14 }}
-                    maxLength={13}
-                  />
-                  {errors.rfc && <p className="text-red-500 mt-1" style={{ fontSize: 12 }}>{errors.rfc}</p>}
-                </div>
-                <div>
-                  <label className="block mb-1.5" style={{ fontSize: 13 }}>Direccion Fiscal / Local</label>
-                  <input
-                    type="text"
-                    value={businessAddress}
-                    onChange={(e) => { setBusinessAddress(e.target.value); clearError("businessAddress"); }}
-                    placeholder="Calle, Numero, Col, CP"
-                    className={`w-full px-4 py-3 rounded-lg border ${errors.businessAddress ? "border-red-500 bg-red-50/50" : "border-border bg-gray-50"} focus:border-primary outline-none`}
-                    style={{ fontSize: 14 }}
-                  />
-                  {errors.businessAddress && <p className="text-red-500 mt-1" style={{ fontSize: 12 }}>{errors.businessAddress}</p>}
-                </div>
-              </div>
-            )}
-
             <button
               type="submit"
-              className="w-full bg-primary text-white py-3 rounded-lg hover:bg-primary/90 transition-colors"
+              disabled={isSubmitting}
+              className="w-full bg-primary text-white py-3 rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
               style={{ fontSize: 16, fontWeight: 600 }}
             >
-              Crear Cuenta
+              {isSubmitting ? "Creando cuenta..." : "Crear Cuenta"}
             </button>
           </form>
 

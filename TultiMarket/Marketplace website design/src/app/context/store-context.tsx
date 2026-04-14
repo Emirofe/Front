@@ -1,120 +1,280 @@
-import React, { createContext, useContext, useState, useCallback } from "react";
-import { Product, CartItem, Order, User, mockOrders, mockAddresses, Address, mockUsers } from "../data/mock-data";
+import React, { createContext, useContext, useState, useCallback, useEffect } from "react";
+import {
+  Product,
+  CartItem,
+  Order,
+  User,
+  Address,
+  PaymentMethod,
+} from "../data/mock-data";
+import {
+  loginApi,
+  registerApi,
+  logoutApi,
+  getMiCuentaApi,
+  getMisDireccionesApi,
+  addDireccionApi,
+  deleteDireccionApi,
+  getMisMetodosPagoApi,
+  getCarritoApi,
+  addProductoAlCarritoApi,
+  addServicioAlCarritoApi,
+  updateItemCarritoApi,
+  deleteItemCarritoApi,
+  vaciarCarritoApi,
+  checkoutApi,
+} from "../api/api-client";
+
+// ─── Tipo extendido del CarritoItem para guardar el id_item del backend ───────
+interface CartItemConId extends CartItem {
+  idItem?: number; // id del registro en carrito_items de la BD
+}
 
 interface StoreState {
   currentUser: User | null;
-  cart: CartItem[];
+  cart: CartItemConId[];
   wishlist: Product[];
   orders: Order[];
   addresses: Address[];
+  paymentMethods: PaymentMethod[];
+  negocioId: number | null; // Para vendedores: id del negocio vinculado
   isLoggedIn: boolean;
-  login: (email: string, password: string) => User | null;
-  register: (name: string, email: string, password: string, role: string) => boolean;
-  logout: () => void;
-  addToCart: (product: Product, quantity?: number, selectedDate?: string, selectedTime?: string) => void;
-  removeFromCart: (productId: string) => void;
-  updateCartQuantity: (productId: string, quantity: number) => void;
-  clearCart: () => void;
+  isLoading: boolean;
+  // Auth
+  login: (email: string, password: string) => Promise<User | null>;
+  register: (name: string, email: string, password: string, role: string) => Promise<boolean>;
+  logout: () => Promise<void>;
+  // Cart
+  addToCart: (product: Product, quantity?: number, selectedDate?: string, selectedTime?: string) => Promise<void>;
+  removeFromCart: (productId: string) => Promise<void>;
+  updateCartQuantity: (productId: string, quantity: number) => Promise<void>;
+  clearCart: () => Promise<void>;
   getCartTotal: () => number;
   getCartCount: () => number;
+  // Wishlist (local por ahora, sin backend)
   addToWishlist: (product: Product) => void;
   removeFromWishlist: (productId: string) => void;
   isInWishlist: (productId: string) => boolean;
-  placeOrder: (address: string) => Order;
-  addAddress: (address: Omit<Address, "id">) => void;
-  removeAddress: (id: string) => void;
+  // Orders
+  placeOrder: (address: string, idDireccion?: number, idMetodoPago?: number) => Promise<Order>;
+  // Addresses
+  addAddress: (address: Omit<Address, "id">) => Promise<void>;
+  removeAddress: (id: string) => Promise<void>;
+  reloadAddresses: () => Promise<void>;
+  reloadPaymentMethods: () => Promise<void>;
+  updateNegocioId: (id: number) => void;
 }
 
 const StoreContext = createContext<StoreState | undefined>(undefined);
 
 export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [cart, setCart] = useState<CartItem[]>([]);
+  const [cart, setCart] = useState<CartItemConId[]>([]);
   const [wishlist, setWishlist] = useState<Product[]>([]);
-  const [orders, setOrders] = useState<Order[]>(mockOrders);
-  const [addresses, setAddresses] = useState<Address[]>(mockAddresses);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [addresses, setAddresses] = useState<Address[]>([]);
+  const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
+  const [negocioId, setNegocioId] = useState<number | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
 
-  const login = useCallback((email: string, _password: string) => {
-    // Si el email coincide con algun mock, usamos ese rol. Si no, default a comprador.
-    const existingUser = mockUsers.find((u) => u.email === email);
-    
-    if (existingUser) {
-      setCurrentUser(existingUser);
-      return existingUser;
-    } else {
-      const newUser: User = {
-        id: "current-user",
-        name: email.split("@")[0],
-        email,
-        role: "comprador",
-        registrationDate: "2026-01-01",
-        status: "Activo",
-        phone: "55 1234 5678",
-      };
-      setCurrentUser(newUser);
-      return newUser;
+  // ─── Carga el carrito desde el backend ───────────────────────────────────
+  const reloadCart = useCallback(async () => {
+    try {
+      const carritoData = await getCarritoApi();
+      const newCart: CartItemConId[] = carritoData.items.map((item) => ({
+        idItem: item.id_item,
+        product: {
+          id: String(item.id_producto ?? item.id_servicio ?? 0),
+          name: item.nombre,
+          description: "",
+          price: item.precio_unitario,
+          image: "",
+          images: [],
+          category: "general",
+          rating: 0,
+          reviewCount: 0,
+          stock: 99,
+          sellerId: "0",
+          sellerName: item.empresa,
+          reviews: [],
+          type: item.tipo_item,
+          status: "Aprobado" as const,
+        },
+        quantity: item.cantidad,
+      }));
+      setCart(newCart);
+    } catch {
+      // Si falla (no logueado o carrito vacío) no hacemos nada
     }
   }, []);
 
-  const register = useCallback((name: string, email: string, _password: string, role: string) => {
-    setCurrentUser({
-      id: "current-user",
-      name,
-      email,
-      role: role as any,
-      registrationDate: new Date().toISOString().split("T")[0],
-      status: "Activo",
-    });
-    return true;
+  // ─── Carga las direcciones del backend ───────────────────────────────────
+  const reloadAddresses = useCallback(async () => {
+    try {
+      const dirs = await getMisDireccionesApi();
+      setAddresses(dirs);
+    } catch {
+      setAddresses([]);
+    }
   }, []);
 
-  const logout = useCallback(() => {
-    setCurrentUser(null);
-    setCart([]);
+  // ─── Carga los métodos de pago del backend ───────────────────────────────
+  const reloadPaymentMethods = useCallback(async () => {
+    try {
+      const metodos = await getMisMetodosPagoApi();
+      setPaymentMethods(metodos);
+    } catch {
+      setPaymentMethods([]);
+    }
   }, []);
 
-  const addToCart = useCallback((product: Product, quantity = 1, selectedDate?: string, selectedTime?: string) => {
-    setCart((prev) => {
-      // If it's a service with a specific date/time, treat it as a unique item
-      const isService = product.type === "servicio";
-      const existing = prev.find((item) => 
-        item.product.id === product.id && 
-        (!isService || (item.selectedDate === selectedDate && item.selectedTime === selectedTime))
-      );
-      
-      if (existing) {
-        // Cap at product stock for physical products
-        const maxQty = !isService ? product.stock : Infinity;
-        const newQty = Math.min(existing.quantity + quantity, maxQty);
-        return prev.map((item) =>
-          item.product.id === product.id && (!isService || (item.selectedDate === selectedDate && item.selectedTime === selectedTime))
-            ? { ...item, quantity: newQty }
-            : item
-        );
+  // ─── AUTH ─────────────────────────────────────────────────────────────────
+
+  const login = useCallback(async (email: string, password: string): Promise<User | null> => {
+    setIsLoading(true);
+    try {
+      const userWithNegocio = await loginApi(email, password);
+      setCurrentUser(userWithNegocio);
+      // Guardar id_negocio si es vendedor
+      if (userWithNegocio.id_negocio) {
+        setNegocioId(userWithNegocio.id_negocio);
       }
-      // Cap initial quantity at stock
-      const cappedQty = !isService ? Math.min(quantity, product.stock) : quantity;
-      return [...prev, { product, quantity: cappedQty, selectedDate, selectedTime }];
-    });
+      // Cargar datos del usuario al loguearse
+      await reloadCart();
+      await reloadAddresses();
+      await reloadPaymentMethods();
+      return userWithNegocio;
+    } catch (error) {
+      console.error("Error al iniciar sesión:", error);
+      return null;
+    } finally {
+      setIsLoading(false);
+    }
+  }, [reloadCart, reloadAddresses, reloadPaymentMethods]);
+
+  const register = useCallback(async (
+    name: string,
+    email: string,
+    password: string,
+    role: string
+  ): Promise<boolean> => {
+    setIsLoading(true);
+    try {
+      await registerApi(name, email, password, role as "comprador" | "vendedor");
+      // Después del registro, hacer login automático
+      const user = await loginApi(email, password);
+      setCurrentUser(user);
+      return true;
+    } catch (error) {
+      console.error("Error al registrar:", error);
+      return false;
+    } finally {
+      setIsLoading(false);
+    }
   }, []);
 
-  const removeFromCart = useCallback((productId: string) => {
-    setCart((prev) => prev.filter((item) => item.product.id !== productId));
+  const logout = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      await logoutApi();
+    } catch {
+      // Ignoramos errores de logout (el back puede redirigir)
+    } finally {
+      setCurrentUser(null);
+      setCart([]);
+      setOrders([]);
+      setAddresses([]);
+      setPaymentMethods([]);
+      setNegocioId(null);
+      setIsLoading(false);
+    }
   }, []);
 
-  const updateCartQuantity = useCallback((productId: string, quantity: number) => {
-    if (quantity <= 0) {
-      setCart((prev) => prev.filter((item) => item.product.id !== productId));
+  // ─── CARRITO ──────────────────────────────────────────────────────────────
+
+  const addToCart = useCallback(async (
+    product: Product,
+    quantity = 1,
+    _selectedDate?: string,
+    _selectedTime?: string
+  ) => {
+    if (!currentUser) {
+      // Si no está logueado, mostrar en local temporalmente
+      setCart((prev) => {
+        const existing = prev.find((i) => i.product.id === product.id);
+        if (existing) {
+          return prev.map((i) =>
+            i.product.id === product.id
+              ? { ...i, quantity: Math.min(i.quantity + quantity, product.stock || 99) }
+              : i
+          );
+        }
+        return [...prev, { product, quantity }];
+      });
       return;
     }
-    setCart((prev) =>
-      prev.map((item) =>
-        item.product.id === productId ? { ...item, quantity } : item
-      )
-    );
-  }, []);
 
-  const clearCart = useCallback(() => setCart([]), []);
+    try {
+      if (product.type === "servicio") {
+        await addServicioAlCarritoApi(Number(product.id), quantity);
+      } else {
+        await addProductoAlCarritoApi(Number(product.id), quantity);
+      }
+      await reloadCart();
+    } catch (error) {
+      console.error("Error al agregar al carrito:", error);
+      throw error; // Propaga para que la página pueda mostrar el error
+    }
+  }, [currentUser, reloadCart]);
+
+  const removeFromCart = useCallback(async (productId: string) => {
+    const item = cart.find((i) => i.product.id === productId);
+    if (!item?.idItem || !currentUser) {
+      // Local (no logueado)
+      setCart((prev) => prev.filter((i) => i.product.id !== productId));
+      return;
+    }
+    try {
+      await deleteItemCarritoApi(item.idItem);
+      await reloadCart();
+    } catch (error) {
+      console.error("Error al eliminar del carrito:", error);
+    }
+  }, [cart, currentUser, reloadCart]);
+
+  const updateCartQuantity = useCallback(async (productId: string, quantity: number) => {
+    const item = cart.find((i) => i.product.id === productId);
+    if (quantity <= 0) {
+      await removeFromCart(productId);
+      return;
+    }
+    if (!item?.idItem || !currentUser) {
+      // Local
+      setCart((prev) =>
+        prev.map((i) => i.product.id === productId ? { ...i, quantity } : i)
+      );
+      return;
+    }
+    try {
+      await updateItemCarritoApi(item.idItem, quantity);
+      await reloadCart();
+    } catch (error) {
+      console.error("Error al actualizar carrito:", error);
+    }
+  }, [cart, currentUser, removeFromCart, reloadCart]);
+
+  const clearCart = useCallback(async () => {
+    if (!currentUser) {
+      setCart([]);
+      return;
+    }
+    try {
+      await vaciarCarritoApi();
+      setCart([]);
+    } catch (error) {
+      console.error("Error al vaciar carrito:", error);
+    }
+  }, [currentUser]);
 
   const getCartTotal = useCallback(() => {
     return cart.reduce((sum, item) => sum + item.product.price * item.quantity, 0);
@@ -123,6 +283,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const getCartCount = useCallback(() => {
     return cart.reduce((sum, item) => sum + item.quantity, 0);
   }, [cart]);
+
+  // ─── WISHLIST (local por ahora) ───────────────────────────────────────────
 
   const addToWishlist = useCallback((product: Product) => {
     setWishlist((prev) => {
@@ -140,33 +302,82 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     [wishlist]
   );
 
-  const placeOrder = useCallback(
-    (address: string) => {
+  // ─── PEDIDOS ──────────────────────────────────────────────────────────────
+
+  const placeOrder = useCallback(async (
+    _address: string,
+    idDireccion?: number,
+    idMetodoPago?: number
+  ): Promise<Order> => {
+    setIsLoading(true);
+    try {
+      const result = await checkoutApi(idDireccion, idMetodoPago);
       const newOrder: Order = {
-        id: `o${orders.length + 1}`,
-        folio: `ORD-2026-${String(orders.length + 1).padStart(3, "0")}`,
-        date: new Date().toISOString().split("T")[0],
+        id: String(result.pedido.id),
+        folio: `ORD-${result.pedido.id}`,
+        date: result.pedido.fecha_creacion?.split("T")[0] ?? new Date().toISOString().split("T")[0],
         items: [...cart],
-        total: cart.reduce((sum, item) => sum + item.product.price * item.quantity, 0),
+        total: result.pedido.total,
         status: "En preparacion",
-        buyerName: currentUser?.name || "Usuario",
-        buyerId: currentUser?.id || "unknown",
-        address,
+        buyerName: currentUser?.name ?? "Usuario",
+        buyerId: currentUser?.id ?? "0",
+        address: _address,
       };
       setOrders((prev) => [newOrder, ...prev]);
       setCart([]);
       return newOrder;
-    },
-    [cart, orders.length, currentUser]
-  );
+    } finally {
+      setIsLoading(false);
+    }
+  }, [cart, currentUser]);
 
-  const addAddress = useCallback((address: Omit<Address, "id">) => {
-    setAddresses((prev) => [...prev, { ...address, id: `a${Date.now()}` }]);
-  }, []);
+  // ─── DIRECCIONES ──────────────────────────────────────────────────────────
 
-  const removeAddress = useCallback((id: string) => {
-    setAddresses((prev) => prev.filter((a) => a.id !== id));
-  }, []);
+  const addAddress = useCallback(async (address: Omit<Address, "id">) => {
+    if (!currentUser) {
+      setAddresses((prev) => [...prev, { ...address, id: `a${Date.now()}` }]);
+      return;
+    }
+    try {
+      await addDireccionApi(address);
+      await reloadAddresses();
+    } catch (error) {
+      console.error("Error al agregar dirección:", error);
+      throw error;
+    }
+  }, [currentUser, reloadAddresses]);
+
+  const removeAddress = useCallback(async (id: string) => {
+    if (!currentUser) {
+      setAddresses((prev) => prev.filter((a) => a.id !== id));
+      return;
+    }
+    try {
+      await deleteDireccionApi(Number(id));
+      await reloadAddresses();
+    } catch (error) {
+      console.error("Error al eliminar dirección:", error);
+      throw error;
+    }
+  }, [currentUser, reloadAddresses]);
+
+  // ─── Verifica si hay sesión activa al cargar la app ───────────────────────
+  useEffect(() => {
+    getMiCuentaApi()
+      .then(async (user) => {
+        setCurrentUser(user);
+        // Restaurar id_negocio si es vendedor
+        if (user.id_negocio) {
+          setNegocioId(user.id_negocio);
+        }
+        await reloadCart();
+        await reloadAddresses();
+        await reloadPaymentMethods();
+      })
+      .catch(() => {
+        // No hay sesión activa, es normal
+      });
+  }, [reloadCart, reloadAddresses, reloadPaymentMethods]);
 
   return (
     <StoreContext.Provider
@@ -176,7 +387,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         wishlist,
         orders,
         addresses,
+        paymentMethods,
+        negocioId,
         isLoggedIn: !!currentUser,
+        isLoading,
         login,
         register,
         logout,
@@ -192,6 +406,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         placeOrder,
         addAddress,
         removeAddress,
+        reloadAddresses,
+        reloadPaymentMethods,
+        updateNegocioId: setNegocioId,
       }}
     >
       {children}

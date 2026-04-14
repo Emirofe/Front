@@ -1,7 +1,12 @@
 import { Package, Boxes, Gift, ClipboardList, BarChart3, User, Calendar, Wrench } from "lucide-react";
 import { DashboardLayout } from "../../components/layout/dashboard-layout";
+import { useStore } from "../../context/store-context";
+import { SetupBusiness } from "./setup-business";
+import { Navigate } from "react-router";
 
 export function SellerLayout() {
+  const { currentUser, negocioId, updateNegocioId } = useStore();
+
   const items = [
     { label: "Mis Productos", path: "/vendedor/productos", icon: <Package size={18} /> },
     { label: "Mis Servicios", path: "/vendedor/servicios", icon: <Wrench size={18} /> },
@@ -12,6 +17,16 @@ export function SellerLayout() {
     { label: "Mi Agenda", path: "/vendedor/agenda", icon: <Calendar size={18} /> },
     { label: "Mi Perfil", path: "/perfil", icon: <User size={18} /> },
   ];
+
+  // Si no está logueado, redirigir
+  if (!currentUser) {
+    return <Navigate to="/login" replace />;
+  }
+
+  // Si no tiene negocio, mostrar onboarding
+  if (!negocioId) {
+    return <SetupBusiness onComplete={(id) => updateNegocioId(id)} />;
+  }
 
   return <DashboardLayout title="Panel de Vendedor" items={items} />;
 }

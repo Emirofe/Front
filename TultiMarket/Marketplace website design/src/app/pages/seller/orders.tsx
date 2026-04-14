@@ -1,45 +1,97 @@
-import { useState } from "react";
-import { ChevronDown, ChevronUp, Calendar, Filter } from "lucide-react";
-import { mockOrders, Order } from "../../data/mock-data";
+import { useState, useEffect } from "react";
+import { ChevronDown, ChevronUp, Calendar, Filter, Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import { orderService } from "../../services/order-service";
+
+interface OrderItem {
+  id: number;
+  type: string;
+  name: string;
+  quantity: number;
+  price: number;
+  subtotal: number;
+}
+
+interface VendorOrder {
+  id: number;
+  folio: string;
+  date: string;
+  buyerName: string;
+  buyerEmail: string;
+  buyerPhone: string | null;
+  total: number;
+  status: string;
+  address: any;
+  items: OrderItem[];
+}
 
 export function SellerOrdersPage() {
-  const [orders, setOrders] = useState<Order[]>(mockOrders);
-  const [expandedOrder, setExpandedOrder] = useState<string | null>(null);
+  const [orders, setOrders] = useState<VendorOrder[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [expandedOrder, setExpandedOrder] = useState<number | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>("all");
+
+  // ─── Cargar pedidos del backend ────────────────────────────────────────────
+  useEffect(() => {
+    setIsLoading(true);
+    fetch("http://localhost:3000/api/vendedor/pedidos", { credentials: "include" })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.status === "success") {
+          setOrders(data.pedidos || []);
+        }
+      })
+      .catch((err) => {
+        console.error("Error al cargar pedidos:", err);
+        toast.error("Error al cargar pedidos");
+      })
+      .finally(() => setIsLoading(false));
+  }, []);
 
   const filtered = statusFilter === "all"
     ? orders
-    : orders.filter((o) => o.status === statusFilter);
+    : orders.filter((o) => o.status.toUpperCase() === statusFilter.toUpperCase());
 
-  const updateStatus = async (orderId: string, newStatus: Order["status"]) => {
+  const updateStatus = async (orderId: number, newStatus: string) => {
     try {
-      const response = await orderService.updateOrderStatus({
-        orderId,
-        newStatus,
+      const res = await fetch(`http://localhost:3000/api/vendedor/pedidos/${orderId}/estado`, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ estado: newStatus }),
       });
+      const data = await res.json();
 
-      if (response.status === "success") {
+      if (data.status === "success") {
         setOrders((prev) =>
-          prev.map((o) => (o.id === orderId ? { ...o, status: newStatus } : o))
+          prev.map((o) => (o.id === orderId ? { ...o, status: newStatus.toUpperCase() } : o))
         );
         toast.success(`Pedido actualizado a: ${newStatus}`);
       } else {
-        toast.error(response.message || "Error al actualizar el estado del pedido");
+        toast.error(data.mensaje || "Error al actualizar estado");
       }
     } catch (error) {
-      toast.error("Error de conexión al actualizar el estado del pedido");
+      toast.error("Error de conexión al actualizar estado");
     }
   };
 
   const getStatusColor = (status: string) => {
-    switch (status) {
-      case "Entregado": return "bg-green-100 text-green-700";
-      case "Enviado": return "bg-blue-100 text-blue-700";
-      default: return "bg-amber-100 text-amber-700";
+    const s = status.toUpperCase();
+    switch (s) {
+      case "ENTREGADO": return "bg-green-100 text-green-700";
+      case "ENVIADO": return "bg-blue-100 text-blue-700";
+      case "EN PREPARACION": return "bg-amber-100 text-amber-700";
+      case "CANCELADO": return "bg-red-100 text-red-700";
+      default: return "bg-gray-100 text-gray-600";
     }
   };
+
+  if (isLoading) {
+    return (
+      <div className="flex justify-center py-20">
+        <Loader2 className="animate-spin text-primary" size={40} />
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -48,7 +100,7 @@ export function SellerOrdersPage() {
       {/* Filters */}
       <div className="flex items-center gap-3 mb-6 flex-wrap">
         <Filter size={18} className="text-muted-foreground" />
-        {["all", "En preparacion", "Enviado", "Entregado"].map((status) => (
+        {["all", "PENDIENTE", "EN PREPARACION", "ENVIADO", "ENTREGADO", "CANCELADO"].map((status) => (
           <button
             key={status}
             onClick={() => setStatusFilter(status)}
@@ -75,7 +127,7 @@ export function SellerOrdersPage() {
                 <div>
                   <p style={{ fontSize: 15, fontWeight: 600 }}>{order.folio}</p>
                   <p className="text-muted-foreground flex items-center gap-1" style={{ fontSize: 13 }}>
-                    <Calendar size={12} /> {order.date}
+                    <Calendar size={12} /> {new Date(order.date).toLocaleDateString("es-MX")}
                   </p>
                 </div>
                 <div>
@@ -100,29 +152,35 @@ export function SellerOrdersPage() {
                 <div className="space-y-3 mb-4">
                   {order.items.map((item, i) => (
                     <div key={i} className="flex items-center gap-4">
-                      <img src={item.product.image} alt="" className="w-12 h-12 rounded-lg object-cover" />
-                      <div className="flex-1">
-                        <p style={{ fontSize: 14 }}>{item.product.name}</p>
-                        <p className="text-muted-foreground" style={{ fontSize: 13 }}>Cant: {item.quantity} x ${item.product.price.toFixed(2)}</p>
+                      <div className="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center text-primary" style={{ fontSize: 20, fontWeight: 700 }}>
+                        {item.type === "producto" ? "📦" : "🛠️"}
                       </div>
-                      <p style={{ fontSize: 14, fontWeight: 600 }}>${(item.product.price * item.quantity).toFixed(2)}</p>
+                      <div className="flex-1">
+                        <p style={{ fontSize: 14 }}>{item.name}</p>
+                        <p className="text-muted-foreground" style={{ fontSize: 13 }}>Cant: {item.quantity} x ${item.price.toFixed(2)}</p>
+                      </div>
+                      <p style={{ fontSize: 14, fontWeight: 600 }}>${item.subtotal.toFixed(2)}</p>
                     </div>
                   ))}
                 </div>
-                <p className="text-muted-foreground mb-4" style={{ fontSize: 14 }}>
-                  Direccion: {order.address}
-                </p>
+                {order.buyerEmail && (
+                  <p className="text-muted-foreground mb-2" style={{ fontSize: 14 }}>
+                    Email: {order.buyerEmail}
+                  </p>
+                )}
                 <div className="flex items-center gap-2">
                   <span className="text-muted-foreground" style={{ fontSize: 14 }}>Actualizar estado:</span>
                   <select
                     value={order.status}
-                    onChange={(e) => updateStatus(order.id, e.target.value as Order["status"])}
+                    onChange={(e) => updateStatus(order.id, e.target.value)}
                     className="px-3 py-2 border border-border rounded-lg bg-white"
                     style={{ fontSize: 14 }}
                   >
-                    <option value="En preparacion">En preparacion</option>
-                    <option value="Enviado">Enviado</option>
-                    <option value="Entregado">Entregado</option>
+                    <option value="PENDIENTE">Pendiente</option>
+                    <option value="EN PREPARACION">En preparación</option>
+                    <option value="ENVIADO">Enviado</option>
+                    <option value="ENTREGADO">Entregado</option>
+                    <option value="CANCELADO">Cancelado</option>
                   </select>
                 </div>
               </div>
@@ -133,7 +191,9 @@ export function SellerOrdersPage() {
 
       {filtered.length === 0 && (
         <div className="text-center py-16 bg-white rounded-xl border border-border">
-          <p className="text-muted-foreground" style={{ fontSize: 16 }}>No hay pedidos con este filtro</p>
+          <p className="text-muted-foreground" style={{ fontSize: 16 }}>
+            {orders.length === 0 ? "Aún no tienes pedidos" : "No hay pedidos con este filtro"}
+          </p>
         </div>
       )}
     </div>

@@ -1,18 +1,34 @@
-import { useState } from "react";
-import { AlertTriangle, Check, XCircle } from "lucide-react";
-import { products } from "../../data/mock-data";
+import { useState, useEffect } from "react";
+import { AlertTriangle, Check, XCircle, Loader2 } from "lucide-react";
+import { getProductosVendedorApi, updateProductoVendedorApi } from "../../api/api-client";
+import { useStore } from "../../context/store-context";
 import { toast } from "sonner";
 
+interface InventoryItem {
+  id: number;
+  nombre: string;
+  imagen_principal: string | null;
+  stock_total: number;
+  precio: number;
+  esta_activo: boolean;
+}
+
 export function SellerInventoryPage() {
-  const [inventory, setInventory] = useState(
-    products.filter((p) => p.sellerId === "s1").map((p) => ({
-      id: p.id,
-      name: p.name,
-      image: p.image,
-      stock: p.stock,
-      editing: false,
-    }))
-  );
+  const { negocioId } = useStore();
+  const [inventory, setInventory] = useState<InventoryItem[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    if (!negocioId) {
+      setIsLoading(false);
+      return;
+    }
+    setIsLoading(true);
+    getProductosVendedorApi(negocioId)
+      .then((data) => setInventory(data))
+      .catch(() => toast.error("Error al cargar inventario"))
+      .finally(() => setIsLoading(false));
+  }, [negocioId]);
 
   const getStockStatus = (stock: number) => {
     if (stock === 0) return { label: "Agotado", color: "text-red-600 bg-red-50", icon: XCircle };
@@ -20,13 +36,38 @@ export function SellerInventoryPage() {
     return { label: "En Stock", color: "text-green-600 bg-green-50", icon: Check };
   };
 
-  const updateStock = (id: string, newStock: number) => {
-    setInventory((prev) =>
-      prev.map((item) =>
-        item.id === id ? { ...item, stock: Math.max(0, newStock) } : item
-      )
-    );
+  const updateStock = async (item: InventoryItem, newStock: number) => {
+    const finalStock = Math.max(0, newStock);
+    try {
+      await updateProductoVendedorApi(item.id, {
+        nombre: item.nombre,
+        precio: item.precio,
+        stock_total: finalStock,
+      });
+      setInventory((prev) =>
+        prev.map((i) => (i.id === item.id ? { ...i, stock_total: finalStock } : i))
+      );
+      toast.success("Stock actualizado");
+    } catch {
+      toast.error("Error al actualizar stock");
+    }
   };
+
+  if (!negocioId) {
+    return (
+      <div className="text-center py-20">
+        <p className="text-muted-foreground" style={{ fontSize: 18 }}>No tienes un negocio vinculado.</p>
+      </div>
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <div className="flex justify-center py-20">
+        <Loader2 className="animate-spin text-primary" size={40} />
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -41,13 +82,13 @@ export function SellerInventoryPage() {
         <div className="bg-white rounded-xl border border-border p-5">
           <p className="text-muted-foreground" style={{ fontSize: 13 }}>Stock Bajo</p>
           <p className="text-amber-600" style={{ fontSize: 28, fontWeight: 700 }}>
-            {inventory.filter((i) => i.stock > 0 && i.stock < 10).length}
+            {inventory.filter((i) => i.stock_total > 0 && i.stock_total < 10).length}
           </p>
         </div>
         <div className="bg-white rounded-xl border border-border p-5">
           <p className="text-muted-foreground" style={{ fontSize: 13 }}>Agotados</p>
           <p className="text-red-600" style={{ fontSize: 28, fontWeight: 700 }}>
-            {inventory.filter((i) => i.stock === 0).length}
+            {inventory.filter((i) => i.stock_total === 0).length}
           </p>
         </div>
       </div>
@@ -64,51 +105,69 @@ export function SellerInventoryPage() {
             </tr>
           </thead>
           <tbody>
-            {inventory.map((item) => {
-              const status = getStockStatus(item.stock);
-              const StatusIcon = status.icon;
-              return (
-                <tr key={item.id} className={`border-b border-border last:border-0 ${item.stock < 10 ? "bg-red-50/30" : ""}`}>
-                  <td className="px-4 py-4">
-                    <div className="flex items-center gap-3">
-                      <img src={item.image} alt="" className="w-10 h-10 rounded-lg object-cover" />
-                      <span className="truncate max-w-[200px]" style={{ fontSize: 14 }}>{item.name}</span>
-                    </div>
-                  </td>
-                  <td className="px-4 py-4">
-                    <input
-                      type="number"
-                      value={item.stock}
-                      onChange={(e) => updateStock(item.id, parseInt(e.target.value) || 0)}
-                      className="w-20 px-3 py-2 border border-border rounded-lg text-center bg-white"
-                      style={{ fontSize: 14 }}
-                      min={0}
-                    />
-                  </td>
-                  <td className="px-4 py-4">
-                    <span className={`inline-flex items-center gap-1 px-3 py-1 rounded-full ${status.color}`} style={{ fontSize: 13 }}>
-                      <StatusIcon size={14} /> {status.label}
-                    </span>
-                  </td>
-                  <td className="px-4 py-4 text-right">
-                    <div className="flex items-center justify-end gap-1">
-                      <button
-                        onClick={() => { updateStock(item.id, item.stock - 1); toast("Stock actualizado"); }}
-                        className="px-3 py-1 border border-border rounded-lg hover:bg-gray-50" style={{ fontSize: 14 }}
-                      >
-                        -1
-                      </button>
-                      <button
-                        onClick={() => { updateStock(item.id, item.stock + 10); toast("Stock actualizado"); }}
-                        className="px-3 py-1 border border-border rounded-lg hover:bg-gray-50" style={{ fontSize: 14 }}
-                      >
-                        +10
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
+            {inventory.length === 0 ? (
+              <tr>
+                <td colSpan={4} className="text-center py-12 text-muted-foreground" style={{ fontSize: 14 }}>
+                  No tienes productos registrados
+                </td>
+              </tr>
+            ) : (
+              inventory.map((item) => {
+                const status = getStockStatus(item.stock_total);
+                const StatusIcon = status.icon;
+                return (
+                  <tr key={item.id} className={`border-b border-border last:border-0 ${item.stock_total < 10 ? "bg-red-50/30" : ""}`}>
+                    <td className="px-4 py-4">
+                      <div className="flex items-center gap-3">
+                        {item.imagen_principal ? (
+                          <img src={item.imagen_principal} alt="" className="w-10 h-10 rounded-lg object-cover" />
+                        ) : (
+                          <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary" style={{ fontSize: 16 }}>📦</div>
+                        )}
+                        <span className="truncate max-w-[200px]" style={{ fontSize: 14 }}>{item.nombre}</span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-4">
+                      <input
+                        type="number"
+                        value={item.stock_total}
+                        onChange={(e) => {
+                          const val = parseInt(e.target.value) || 0;
+                          setInventory((prev) =>
+                            prev.map((i) => (i.id === item.id ? { ...i, stock_total: val } : i))
+                          );
+                        }}
+                        onBlur={(e) => updateStock(item, parseInt(e.target.value) || 0)}
+                        className="w-20 px-3 py-2 border border-border rounded-lg text-center bg-white"
+                        style={{ fontSize: 14 }}
+                        min={0}
+                      />
+                    </td>
+                    <td className="px-4 py-4">
+                      <span className={`inline-flex items-center gap-1 px-3 py-1 rounded-full ${status.color}`} style={{ fontSize: 13 }}>
+                        <StatusIcon size={14} /> {status.label}
+                      </span>
+                    </td>
+                    <td className="px-4 py-4 text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <button
+                          onClick={() => updateStock(item, item.stock_total - 1)}
+                          className="px-3 py-1 border border-border rounded-lg hover:bg-gray-50" style={{ fontSize: 14 }}
+                        >
+                          -1
+                        </button>
+                        <button
+                          onClick={() => updateStock(item, item.stock_total + 10)}
+                          className="px-3 py-1 border border-border rounded-lg hover:bg-gray-50" style={{ fontSize: 14 }}
+                        >
+                          +10
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })
+            )}
           </tbody>
         </table>
       </div>

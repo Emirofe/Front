@@ -1,0 +1,884 @@
+/**
+ * api-client.ts
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Cliente centralizado para TODAS las peticiones HTTP al backend.
+ * Usa 'credentials: include' para enviar las cookies de sesión automáticamente.
+ *
+ * ESTADO DE INVOCACIÓN:
+ *   Listo e invocado en    = Ya se llama desde algún archivo del frontend
+ *   Falta por invocar = Existe pero ningún archivo la usa todavía
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
+
+import {
+  mapProductoDetalle,
+  mapProductoLista,
+  mapServicioDetalle,
+  mapUsuario,
+  mapDireccion,
+  mapDireccionToBack,
+  mapMetodoPago,
+  mapPedidoVendedor,
+  mapCategoria,
+  type RawProductoDetalle,
+  type RawServicioDetalle,
+  type RawProductoLista,
+  type RawUsuario,
+  type RawDireccion,
+  type RawMetodoPago,
+  type RawPedido,
+  type RawCategoria,
+} from "./mappers";
+
+import type { Product, User, Address, PaymentMethod, Order } from "../data/mock-data";
+
+// URL base del backend
+const BASE_URL = "http://localhost:3000";
+
+// ─── Helper: fetch con credentials incluidas ─────────────────────────────────
+async function api<T>(
+  endpoint: string,
+  options: RequestInit = {}
+): Promise<T> {
+  const url = `${BASE_URL}${endpoint}`;
+
+  // Si es FormData (subida de archivos) no ponemos Content-Type
+  // para que el browser genere el boundary automáticamente
+  const isFormData = options.body instanceof FormData;
+
+  const response = await fetch(url, {
+    ...options,
+    credentials: "include", // CRÍTICO: envía las cookies de sesión
+    headers: isFormData
+      ? { ...options.headers }
+      : {
+        "Content-Type": "application/json",
+        ...options.headers,
+      },
+  });
+
+  // Si la respuesta está vacía (204 No Content) devolver un objeto vacío
+  const text = await response.text();
+  const data = text ? JSON.parse(text) : {};
+
+  if (!response.ok) {
+    // El backend usa "mensaje" para errors, pero algunos endpoints de vendedor usan "error"
+    const mensaje = data.mensaje ?? data.error ?? `Error HTTP ${response.status}`;
+    throw new Error(mensaje);
+  }
+
+  return data as T;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AUTENTICACIÓN
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Listo e invocado en — en store-context.tsx → login()
+ *
+ * POST /login
+ * Body: { correo, contrasena }
+ * Response: { mensaje, usuario: { id, nombre, email, rol, id_negocio } }
+ *
+ * BUG CORREGIDO: El backend devuelve "rol" como nombre_rol (ej. "Comprador"),
+ * no minúscula. mapUsuario normaliza esto.
+ *
+ * BUG CORREGIDO: El backend también devuelve id_negocio para vendedores,
+ * ahora lo retornamos en el mapeo.
+ */
+export async function loginApi(
+  email: string,
+  password: string
+): Promise<User & { id_negocio?: number | null }> {
+  const data = await api<{
+    usuario: RawUsuario & { id_negocio?: number | null };
+  }>("/login", {
+    method: "POST",
+    body: JSON.stringify({ correo: email, contrasena: password }),
+  });
+  const user = mapUsuario(data.usuario);
+  return { ...user, id_negocio: data.usuario.id_negocio ?? null };
+}
+
+/**
+ * Listo e invocado en — en store-context.tsx → register()
+ *
+ * POST /registrar
+ * Body: { nombre, correo, contrasena, id_rol }
+ * Response: { mensaje, usuario: { id, nombre, email } }
+ *
+ * NOTA: El backend NO retorna "rol" ni "telefono" en el registro,
+ * solo id/nombre/email. El mapper debe manejar campos faltantes.
+ *
+ * id_rol: 1=admin, 2=comprador, 3=vendedor
+ */
+export async function registerApi(
+  nombre: string,
+  email: string,
+  password: string,
+  rol: "comprador" | "vendedor" = "comprador"
+): Promise<User> {
+  const id_rol = rol === "vendedor" ? 3 : 2;
+  const data = await api<{
+    usuario: { id: number; nombre: string; email: string };
+  }>("/registrar", {
+    method: "POST",
+    body: JSON.stringify({ nombre, correo: email, contrasena: password, id_rol }),
+  });
+
+  // El backend NO devuelve rol ni telefono en /registrar, construimos un User parcial
+  return {
+    id: String(data.usuario.id),
+    name: data.usuario.nombre,
+    email: data.usuario.email,
+    role: rol,
+    registrationDate: new Date().toISOString().split("T")[0],
+    status: "Activo",
+  };
+}
+
+/**
+ * Listo e invocado en — en store-context.tsx → logout()
+ *
+ * POST /logout
+ *
+ * BUG CORREGIDO: El backend hace res.redirect("/login") que causa un
+ * error de CORS/parsing. Usamos mode: "no-cors" como fallback y
+ * atrapamos todo error silenciosamente.
+ */
+export async function logoutApi(): Promise<void> {
+  try {
+    await fetch(`${BASE_URL}/logout`, {
+      method: "POST",
+      credentials: "include",
+    });
+  } catch {
+    // El back redirige, es esperado que falle
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CATÁLOGO (Comprador)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Falta por invocar — Falta conectar en home.tsx y search.tsx
+ *
+ * GET /comprador/categorias
+ * Response: [{ id, nombre, tipo }]  (array directo, NO envuelto en objeto)
+ *
+ * No requiere sesión.
+ */
+export async function getCategoriasApi() {
+  const data = await api<RawCategoria[]>("/comprador/categorias");
+  return data.map(mapCategoria);
+}
+
+/**
+ * Falta por invocar — Falta conectar en home.tsx, search.tsx, category.tsx
+ *
+ * GET /comprador/productos/categoria/:idCategoria?q=...&precio_min=...
+ * Response: { id_categoria, filtros, total, productos: [...] }
+ *
+ * No requiere sesión.
+ *
+ * BUG CORREGIDO: numero_resenas viene como string "0" del SQL COUNT().
+ * El mapper ya maneja esto con Number().
+ */
+export async function getProductosPorCategoriaApi(
+  idCategoria: number,
+  filtros?: {
+    q?: string;
+    precio_min?: number;
+    precio_max?: number;
+    calificacion_min?: number;
+    ordenar?: string;
+  }
+): Promise<Product[]> {
+  const params = new URLSearchParams();
+  if (filtros?.q) params.set("q", filtros.q);
+  if (filtros?.precio_min !== undefined) params.set("precio_min", String(filtros.precio_min));
+  if (filtros?.precio_max !== undefined) params.set("precio_max", String(filtros.precio_max));
+  if (filtros?.calificacion_min !== undefined)
+    params.set("calificacion_min", String(filtros.calificacion_min));
+  if (filtros?.ordenar) params.set("ordenar", filtros.ordenar);
+
+  const query = params.toString() ? `?${params.toString()}` : "";
+  const data = await api<{ productos: RawProductoLista[] }>(
+    `/comprador/productos/categoria/${idCategoria}${query}`
+  );
+  return data.productos.map(mapProductoLista);
+}
+
+/**
+ * Falta por invocar — Falta conectar en search.tsx para buscar servicios
+ *
+ * GET /comprador/servicios/categoria/:idCategoria?q=...
+ * Response: { id_categoria, filtros, total, servicios: [...] }
+ *
+ * NOTA: La respuesta usa "servicios" (NO "productos").
+ * El mapper mapProductoLista sirve porque la estructura del row es idéntica.
+ */
+export async function getServiciosPorCategoriaApi(
+  idCategoria: number,
+  filtros?: {
+    q?: string;
+    precio_min?: number;
+    precio_max?: number;
+    calificacion_min?: number;
+    ordenar?: string;
+  }
+): Promise<Product[]> {
+  const params = new URLSearchParams();
+  if (filtros?.q) params.set("q", filtros.q);
+  if (filtros?.precio_min !== undefined) params.set("precio_min", String(filtros.precio_min));
+  if (filtros?.precio_max !== undefined) params.set("precio_max", String(filtros.precio_max));
+  if (filtros?.calificacion_min !== undefined)
+    params.set("calificacion_min", String(filtros.calificacion_min));
+  if (filtros?.ordenar) params.set("ordenar", filtros.ordenar);
+
+  const query = params.toString() ? `?${params.toString()}` : "";
+  const data = await api<{ servicios: RawProductoLista[] }>(
+    `/comprador/servicios/categoria/${idCategoria}${query}`
+  );
+  // Usamos mapProductoLista pero cambiamos el type a "servicio"
+  return data.servicios.map((raw) => {
+    const p = mapProductoLista(raw);
+    return { ...p, type: "servicio" as const };
+  });
+}
+
+/**
+ * Falta por invocar — Falta conectar en product-detail.tsx
+ *
+ * GET /comprador/productos/:id
+ * Response: { producto: { id, nombre, ..., resenas: [...] } }
+ *
+ * No requiere sesión.
+ */
+export async function getProductoDetalleApi(id: number): Promise<Product> {
+  const data = await api<{ producto: RawProductoDetalle }>(`/comprador/productos/${id}`);
+  return mapProductoDetalle(data.producto);
+}
+
+/**
+ * Falta por invocar — Falta conectar en product-detail.tsx (para servicios)
+ *
+ * GET /comprador/servicios/:id
+ * Response: { servicio: { id, nombre, ..., agenda_disponible: [...], resenas: [...] } }
+ *
+ * No requiere sesión.
+ */
+export async function getServicioDetalleApi(id: number): Promise<Product> {
+  const data = await api<{ servicio: RawServicioDetalle }>(`/comprador/servicios/${id}`);
+  return mapServicioDetalle(data.servicio);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CUENTA (requiere sesión activa)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Listo e invocado en — en store-context.tsx → useEffect (restaurar sesión al cargar)
+ *
+ * GET /comprador/cuenta
+ * Response: { id, nombre, email, telefono, rol }  (objeto directo, NO envuelto)
+ *
+ * Requiere sesión activa. Si no hay sesión devuelve 401.
+ */
+export async function getMiCuentaApi(): Promise<User & { id_negocio?: number | null }> {
+  const data = await api<RawUsuario & { id_negocio?: number | null }>("/comprador/cuenta");
+  const user = mapUsuario(data);
+  return { ...user, id_negocio: data.id_negocio ?? null };
+}
+
+/**
+ * Falta por invocar — Falta conectar en profile.tsx
+ *
+ * PUT /comprador/cuenta
+ * Body: { nombre, email, telefono }
+ * Response: { mensaje, usuario: { id, nombre, email, telefono } }
+ *
+ * BUG POTENCIAL: El back retorna { usuario: { ... } } pero SIN el campo "rol".
+ * mapUsuario fallará si no recibe "rol". Corrección: asignar rol por defecto.
+ */
+export async function updateMiCuentaApi(datos: {
+  nombre: string;
+  email: string;
+  telefono?: string;
+}): Promise<User> {
+  const data = await api<{
+    usuario: { id: number; nombre: string; email: string; telefono?: string | null };
+  }>("/comprador/cuenta", {
+    method: "PUT",
+    body: JSON.stringify(datos),
+  });
+
+  // El back NO retorna "rol" en el PUT, construimos el User manualmente
+  return {
+    id: String(data.usuario.id),
+    name: data.usuario.nombre,
+    email: data.usuario.email,
+    role: "comprador", // el PUT no retorna el rol, asumimos comprador
+    registrationDate: new Date().toISOString().split("T")[0],
+    status: "Activo",
+    phone: data.usuario.telefono ?? undefined,
+  };
+}
+
+/**
+ * Listo e invocado en — en store-context.tsx → reloadAddresses()
+ *
+ * GET /comprador/cuenta/direcciones
+ * Response: [{ id, calle, ciudad, estado, codigo_postal, pais, es_principal, tipo_direccion }]
+ *
+ * Devuelve array directo. Requiere sesión.
+ */
+export async function getMisDireccionesApi(): Promise<Address[]> {
+  const data = await api<RawDireccion[]>("/comprador/cuenta/direcciones");
+  return data.map(mapDireccion);
+}
+
+/**
+ * Listo e invocado en — en store-context.tsx → addAddress()
+ *
+ * POST /comprador/cuenta/direcciones
+ * Body: { calle, ciudad, estado, codigo_postal, pais, es_principal, tipo_direccion }
+ * Response: { mensaje, id_direccion: number }
+ *
+ * BUG CORREGIDO ANTERIORMENTE: Quitamos geo_location/PostGIS del INSERT del back.
+ */
+export async function addDireccionApi(addr: Omit<Address, "id">): Promise<number> {
+  const body = mapDireccionToBack(addr);
+  const data = await api<{ id_direccion: number }>("/comprador/cuenta/direcciones", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+  return data.id_direccion;
+}
+
+/**
+ * Listo e invocado en — en store-context.tsx → removeAddress()
+ *
+ * DELETE /comprador/cuenta/direcciones/:id
+ * Response: { mensaje: "Direccion eliminada" }
+ */
+export async function deleteDireccionApi(id: number): Promise<void> {
+  await api(`/comprador/cuenta/direcciones/${id}`, { method: "DELETE" });
+}
+
+/**
+ * Listo e invocado en — en store-context.tsx → reloadPaymentMethods()
+ *
+ * GET /comprador/cuenta/metodos-pago
+ * Response: [{ id, proveedor_pago, ultimos_cuatro, fecha_expiracion }]
+ *
+ * Devuelve array directo. Requiere sesión.
+ */
+export async function getMisMetodosPagoApi(): Promise<PaymentMethod[]> {
+  const data = await api<RawMetodoPago[]>("/comprador/cuenta/metodos-pago");
+  return data.map(mapMetodoPago);
+}
+
+/**
+ * Falta por invocar — Falta conectar en profile.tsx (sección métodos de pago)
+ *
+ * POST /comprador/cuenta/metodos-pago
+ * Body: { proveedor_pago, token_pasarela, ultimos_cuatro, fecha_expiracion }
+ * Response: { mensaje, id_metodo_pago: number }
+ *
+ * NOTA: El backend requiere TODOS los campos incluyendo token_pasarela (string).
+ * El formulario del front deberá enviar un token ficticio como "tok_sim_xxxx"
+ * para simular una pasarela de pago.
+ *
+ * VALIDACIÓN DEL BACK:
+ *   - ultimos_cuatro: exactamente 4 dígitos (regex: /^\d{4}$/)
+ *   - fecha_expiracion: formato MM/YY (regex: /^(0[1-9]|1[0-2])\/\d{2}$/)
+ */
+export async function addMetodoPagoApi(metodoPago: {
+  proveedor_pago: string;
+  token_pasarela: string;
+  ultimos_cuatro: string;
+  fecha_expiracion: string;
+}): Promise<number> {
+  const data = await api<{ id_metodo_pago: number }>("/comprador/cuenta/metodos-pago", {
+    method: "POST",
+    body: JSON.stringify(metodoPago),
+  });
+  return data.id_metodo_pago;
+}
+
+/**
+ * Falta por invocar — Falta conectar en profile.tsx
+ *
+ * DELETE /comprador/cuenta/metodos-pago/:id
+ * Response: { mensaje: "Metodo de pago eliminado" }
+ */
+export async function deleteMetodoPagoApi(id: number): Promise<void> {
+  await api(`/comprador/cuenta/metodos-pago/${id}`, { method: "DELETE" });
+}
+
+/**
+ * Falta por invocar — Falta conectar en profile.tsx (sección seguridad)
+ *
+ * PUT /comprador/cuenta/contrasena
+ * Body: { password_actual, password_nueva }
+ * Response: { mensaje: "Password actualizada" }
+ *
+ * VALIDACIONES DEL BACK:
+ *   - password_nueva mínimo 8 caracteres
+ *   - No puede ser igual a la actual
+ *   - password_actual se verifica contra SHA-256 en la BD
+ */
+export async function cambiarPasswordApi(
+  passwordActual: string,
+  passwordNueva: string
+): Promise<void> {
+  await api("/comprador/cuenta/contrasena", {
+    method: "PUT",
+    body: JSON.stringify({ password_actual: passwordActual, password_nueva: passwordNueva }),
+  });
+}
+
+/**
+ * Falta por invocar — Falta conectar en profile.tsx (botón "Eliminar cuenta")
+ *
+ * DELETE /comprador/cuenta
+ * Body: { password_actual }
+ * Response: { mensaje: "Cuenta eliminada" }
+ *
+ * ADVERTENCIA: Hace soft-delete (activo=false, fecha_eliminacion=NOW()).
+ * Destruye la sesión. El frontend debe redirigir a /login.
+ */
+export async function eliminarCuentaApi(passwordActual: string): Promise<void> {
+  await api("/comprador/cuenta", {
+    method: "DELETE",
+    body: JSON.stringify({ password_actual: passwordActual }),
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CARRITO (requiere sesión activa)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Listo e invocado en — en store-context.tsx → reloadCart()
+ *
+ * GET /comprador/carrito
+ * Response: { total_items, total, items: [...] }
+ *
+ * Cada item contiene:
+ *   id_item         ← id del registro en carrito_items (para PUT/DELETE)
+ *   tipo_item       ← "producto" | "servicio"
+ *   id_producto     ← number | null
+ *   id_servicio     ← number | null
+ *   nombre          ← nombre del producto/servicio
+ *   empresa         ← nombre comercial del negocio
+ *   cantidad        ← number
+ *   precio_unitario ← number
+ *   subtotal        ← number
+ *   agenda          ← null | { fecha_hora_inicio, fecha_hora_fin, estado }
+ */
+export async function getCarritoApi() {
+  return api<{
+    total_items: number;
+    total: number;
+    items: Array<{
+      id_item: number;
+      tipo_item: "producto" | "servicio";
+      id_producto: number | null;
+      id_servicio: number | null;
+      nombre: string;
+      empresa: string;
+      cantidad: number;
+      precio_unitario: number;
+      subtotal: number;
+      agenda: null | { fecha_hora_inicio: string; fecha_hora_fin: string; estado: string };
+    }>;
+  }>("/comprador/carrito");
+}
+
+/**
+ * Listo e invocado en — en store-context.tsx → addToCart() (cuando type !== "servicio")
+ *
+ * POST /comprador/carrito/items
+ * Body: { id_producto: number, cantidad: number }
+ * Response: { mensaje, carrito: { total_items, total, items: [...] } }
+ *
+ * VALIDACIONES DEL BACK:
+ *   - Solo se puede enviar id_producto O id_servicio (no ambos)
+ *   - Verifica stock antes de agregar. Si excede → 400 "Stock insuficiente"
+ *   - Si ya existe un item con ese id_producto en el carrito, SUMA la cantidad
+ */
+export async function addProductoAlCarritoApi(idProducto: number, cantidad: number) {
+  return api("/comprador/carrito/items", {
+    method: "POST",
+    body: JSON.stringify({ id_producto: idProducto, cantidad }),
+  });
+}
+
+/**
+ * Listo e invocado en — en store-context.tsx → addToCart() (cuando type === "servicio")
+ *
+ * POST /comprador/carrito/items
+ * Body: { id_servicio: number, cantidad: number, id_agenda_seleccionada?: number | null }
+ * Response: { mensaje, carrito: { total_items, total, items: [...] } }
+ */
+export async function addServicioAlCarritoApi(
+  idServicio: number,
+  cantidad: number,
+  idAgenda?: number
+) {
+  return api("/comprador/carrito/items", {
+    method: "POST",
+    body: JSON.stringify({
+      id_servicio: idServicio,
+      cantidad,
+      id_agenda_seleccionada: idAgenda ?? null,
+    }),
+  });
+}
+
+/**
+ * Listo e invocado en — en store-context.tsx → updateCartQuantity()
+ *
+ * PUT /comprador/carrito/items/:idItem
+ * Body: { cantidad: number }
+ * Response: { mensaje, carrito: { total_items, total, items: [...] } }
+ *
+ * NOTA: :idItem es el id_item del registro en carrito_items,
+ * NO el id del producto. El store-context ya maneja esta diferencia
+ * guardando idItem en CartItemConId.
+ */
+export async function updateItemCarritoApi(idItem: number, cantidad: number) {
+  return api(`/comprador/carrito/items/${idItem}`, {
+    method: "PUT",
+    body: JSON.stringify({ cantidad }),
+  });
+}
+
+/**
+ * Listo e invocado en — en store-context.tsx → removeFromCart()
+ *
+ * DELETE /comprador/carrito/items/:idItem
+ * Response: { mensaje, carrito: { total_items, total, items: [...] } }
+ */
+export async function deleteItemCarritoApi(idItem: number) {
+  return api(`/comprador/carrito/items/${idItem}`, { method: "DELETE" });
+}
+
+/**
+ * Listo e invocado en — en store-context.tsx → clearCart()
+ *
+ * DELETE /comprador/carrito
+ * Response: { mensaje: "Carrito vaciado" }
+ */
+export async function vaciarCarritoApi() {
+  return api("/comprador/carrito", { method: "DELETE" });
+}
+
+/**
+ * Listo e invocado en — en store-context.tsx → placeOrder()
+ *
+ * POST /comprador/carrito/checkout
+ * Body: { id_direccion?: number | null, id_metodo_pago?: number | null }
+ * Response: { mensaje, pedido: { id, total, estado_pedido, fecha_creacion } }
+ *
+ * BUG CORREGIDO: Quitamos PostGIS (ST_X/ST_Y) de obtenerDireccionCheckout en el back.
+ *
+ * REQUISITOS:
+ *   - El usuario DEBE tener al menos 1 dirección en la BD
+ *   - El usuario DEBE tener al menos 1 método de pago en la BD
+ *   - El carrito NO puede estar vacío
+ *   - Llama a la función SQL procesar_checkout() que es una transacción atómica
+ */
+export async function checkoutApi(idDireccion?: number, idMetodoPago?: number) {
+  return api<{
+    mensaje: string;
+    pedido: { id: number; total: number; estado_pedido: string; fecha_creacion: string };
+  }>("/comprador/carrito/checkout", {
+    method: "POST",
+    body: JSON.stringify({
+      id_direccion: idDireccion ?? null,
+      id_metodo_pago: idMetodoPago ?? null,
+    }),
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PANEL VENDEDOR (requiere sesión de vendedor)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Falta por invocar — Falta conectar en vendedor/pedidos.tsx
+ *
+ * GET /api/vendedor/pedidos
+ * Response: { status: "success", pedidos: [...] }
+ *
+ * El backend resuelve el id_negocio internamente desde la sesión.
+ * Cada pedido incluye items con: id, type, name, quantity, price, subtotal, snapshot.
+ */
+export async function getPedidosVendedorApi(): Promise<Order[]> {
+  const data = await api<{ pedidos: RawPedido[] }>("/api/vendedor/pedidos");
+  return data.pedidos.map(mapPedidoVendedor);
+}
+
+/**
+ * Falta por invocar — Falta conectar en vendedor/pedidos.tsx
+ *
+ * PUT /api/vendedor/pedidos/:pedidoId/estado
+ * Body: { estado: "PENDIENTE" | "EN PREPARACION" | "ENVIADO" | "ENTREGADO" | "CANCELADO" }
+ * Response: { status: "success", mensaje: "..." }
+ *
+ * NOTA: El estado debe estar en MAYÚSCULAS. El backend lo normaliza con .toUpperCase()
+ * pero lo validamos de todos modos.
+ */
+export async function updateEstadoPedidoApi(
+  pedidoId: number,
+  estado: "PENDIENTE" | "EN PREPARACION" | "ENVIADO" | "ENTREGADO" | "CANCELADO"
+): Promise<void> {
+  await api(`/api/vendedor/pedidos/${pedidoId}/estado`, {
+    method: "PUT",
+    body: JSON.stringify({ estado }),
+  });
+}
+
+/**
+ * Falta por invocar — Falta conectar en vendedor/sales.tsx (estadísticas de ventas)
+ *
+ * GET /api/vendedor/pedidos/estadisticas
+ * Response: {
+ *   status: "success",
+ *   estadisticas: {
+ *     por_estado: [{ estado_pedido, cantidad, total_ventas }],
+ *     ventas_mensuales: [{ mes, cantidad_pedidos, total_ventas }],
+ *     total_pedidos: number,
+ *     total_ventas: number
+ *   }
+ * }
+ */
+export async function getEstadisticasVendedorApi() {
+  return api<{
+    estadisticas: {
+      por_estado: Array<{ estado_pedido: string; cantidad: string; total_ventas: string }>;
+      ventas_mensuales: Array<{ mes: string; cantidad_pedidos: string; total_ventas: string }>;
+      total_pedidos: number;
+      total_ventas: number;
+    };
+  }>("/api/vendedor/pedidos/estadisticas");
+}
+
+/**
+ * Falta por invocar — Falta conectar en vendedor/products.tsx
+ *
+ * GET /api/vendedor/productos/:id_negocio
+ * Response: [{ id, id_negocio, nombre, descripcion, precio, stock_total, sku, esta_activo, fecha_registro }]
+ *
+ * Devuelve array directo (NO envuelto en objeto).
+ */
+export async function getProductosVendedorApi(idNegocio: number) {
+  return api<
+    Array<{
+      id: number;
+      id_negocio: number;
+      nombre: string;
+      descripcion: string | null;
+      precio: number;
+      stock_total: number;
+      sku: string | null;
+      esta_activo: boolean;
+      fecha_registro: string;
+    }>
+  >(`/api/vendedor/productos/${idNegocio}`);
+}
+
+/**
+ * Falta por invocar — Falta conectar en vendedor/products.tsx
+ *
+ * POST /api/vendedor/productos
+ * Body: { nombre, descripcion?, precio, id_negocio, sku? }
+ * Response: { id, id_negocio, nombre, descripcion, precio, stock_total, sku, esta_activo, fecha_registro }
+ *
+ * El backend verifica que el negocio existe antes de crear.
+ * Si el SKU ya existe → 409 "SKU duplicado".
+ */
+export async function createProductoVendedorApi(datos: {
+  nombre: string;
+  descripcion?: string;
+  precio: number;
+  id_negocio: number;
+  sku?: string;
+  stock_total?: number;
+  imagenes?: string[];
+  id_categorias?: number[];
+}) {
+  return api("/api/vendedor/productos", {
+    method: "POST",
+    body: JSON.stringify(datos),
+  });
+}
+
+/**
+ * Falta por invocar — Falta conectar en vendedor/products.tsx
+ *
+ * PUT /api/vendedor/productos/:id
+ * Body: { nombre, descripcion?, precio, sku?, esta_activo? }
+ * Response: { id, id_negocio, nombre, descripcion, precio, stock_total, sku, esta_activo, fecha_registro }
+ *
+ * NOTA: El backend también acepta "sku" en el PUT, lo añadimos al tipo.
+ */
+export async function updateProductoVendedorApi(
+  id: number,
+  datos: {
+    nombre: string;
+    descripcion?: string;
+    precio: number;
+    sku?: string;
+    esta_activo?: boolean;
+    stock_total?: number;
+    imagenes?: string[];
+  }
+) {
+  return api(`/api/vendedor/productos/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(datos),
+  });
+}
+
+/**
+ * Falta por invocar — Falta conectar en vendedor/products.tsx
+ *
+ * DELETE /api/vendedor/productos/:id
+ * Response: { message: "Producto eliminado" }
+ *
+ * Es un soft-delete: marca esta_activo = FALSE.
+ */
+export async function deleteProductoVendedorApi(id: number) {
+  return api(`/api/vendedor/productos/${id}`, { method: "DELETE" });
+}
+
+/**
+ * Falta por invocar — Falta conectar en vendedor/services.tsx
+ *
+ * GET /api/vendedor/servicios/:id_negocio
+ * Response: [{ id, id_negocio, nombre, descripcion, precio_base, duracion_minutos, calificacion, esta_activo, fecha_registro }]
+ */
+export async function getServiciosVendedorApi(idNegocio: number) {
+  return api<
+    Array<{
+      id: number;
+      id_negocio: number;
+      nombre: string;
+      descripcion: string | null;
+      precio_base: number;
+      duracion_minutos: number | null;
+      calificacion: number | null;
+      esta_activo: boolean;
+      fecha_registro: string;
+    }>
+  >(`/api/vendedor/servicios/${idNegocio}`);
+}
+
+/**
+ * Falta por invocar — Falta conectar en vendedor/services.tsx
+ *
+ * POST /api/vendedor/servicios
+ * Body: { nombre, descripcion?, precio_base, duracion_minutos?, id_negocio }
+ */
+export async function createServicioVendedorApi(datos: {
+  nombre: string;
+  descripcion?: string;
+  precio_base: number;
+  duracion_minutos?: number;
+  id_negocio: number;
+  imagenes?: string[];
+  id_categorias?: number[];
+}) {
+  return api("/api/vendedor/servicios", {
+    method: "POST",
+    body: JSON.stringify(datos),
+  });
+}
+
+/**
+ * Falta por invocar — Falta conectar en vendedor/services.tsx
+ *
+ * PUT /api/vendedor/servicios/:id
+ * Body: { nombre, descripcion?, precio_base, duracion_minutos?, esta_activo? }
+ */
+export async function updateServicioVendedorApi(
+  id: number,
+  datos: {
+    nombre: string;
+    descripcion?: string;
+    precio_base: number;
+    duracion_minutos?: number;
+    esta_activo?: boolean;
+    imagenes?: string[];
+  }
+) {
+  return api(`/api/vendedor/servicios/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(datos),
+  });
+}
+
+/**
+ * Falta por invocar — Falta conectar en vendedor/services.tsx
+ *
+ * DELETE /api/vendedor/servicios/:id
+ * Response: { message: "Servicio eliminado" }
+ *
+ * Soft-delete: marca esta_activo = FALSE.
+ */
+export async function deleteServicioVendedorApi(id: number) {
+  return api(`/api/vendedor/servicios/${id}`, { method: "DELETE" });
+}
+
+/**
+ * GET /api/vendedor/negocio
+ */
+export async function getNegocioVendedorApi() {
+  return api<{
+    status: string;
+    negocio: {
+      id: number;
+      id_usuario: number;
+      nombre_comercial: string;
+      rfc_tax_id: string | null;
+      logo_url: string | null;
+      direccion: {
+        id: number;
+        calle: string;
+        ciudad: string;
+        estado: string;
+        codigo_postal: string;
+        pais: string;
+        latitud: number;
+        longitud: number;
+      }
+    }
+  }>("/api/vendedor/negocio");
+}
+
+/**
+ * POST /api/vendedor/negocio
+ */
+export async function createNegocioVendedorApi(datos: {
+  nombre_comercial: string;
+  rfc_tax_id?: string;
+  logo_url?: string;
+  calle: string;
+  ciudad: string;
+  estado: string;
+  codigo_postal: string;
+  pais: string;
+  latitud: number;
+  longitud: number;
+}) {
+  return api<{ status: string; mensaje: string; negocio: any }>("/api/vendedor/negocio", {
+    method: "POST",
+    body: JSON.stringify(datos),
+  });
+}

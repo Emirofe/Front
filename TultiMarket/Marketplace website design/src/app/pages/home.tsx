@@ -1,7 +1,8 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useSearchParams, Link } from "react-router";
-import { ChevronLeft, ChevronRight, SlidersHorizontal, X } from "lucide-react";
-import { products, categories } from "../data/mock-data";
+import { ChevronLeft, ChevronRight, SlidersHorizontal, X, Loader2 } from "lucide-react";
+import { type Product } from "../data/mock-data";
+import { getCategoriasApi, getProductosPorCategoriaApi, getServiciosPorCategoriaApi } from "../api/api-client";
 import { ProductCard } from "../components/product-card";
 import { Navbar } from "../components/layout/navbar";
 import { Footer } from "../components/layout/footer";
@@ -24,6 +25,21 @@ const bannerImages = [
   },
 ];
 
+// Iconos para las categorías del backend
+const categoryIcons: Record<string, string> = {
+  cumpleanos: "🎂", bodas: "💒", "baby-shower": "👶", "baby shower": "👶",
+  graduacion: "🎓", halloween: "🎃", navidad: "🎄", "xv-anos": "👑", "xv anos": "👑",
+  "fiestas-infantiles": "🎈", "fiestas infantiles": "🎈",
+  "fotografia-evento": "📸", "fotografia de eventos": "📸",
+  "musica-dj": "🎵", "musica y dj": "🎵",
+  "catering-servicio": "🍽️", catering: "🍽️",
+  "decoracion-profesional": "🎨", "decoracion profesional": "🎨",
+  "animacion-fiestas": "🎪", "animacion para fiestas": "🎪",
+  "transporte-evento": "🚐", "transporte para eventos": "🚐",
+  "iluminacion-evento": "💡", "iluminacion de eventos": "💡",
+  "sonido-evento": "🔊", "equipo de sonido": "🔊",
+};
+
 export function HomePage() {
   const [searchParams] = useSearchParams();
   const [currentBanner, setCurrentBanner] = useState(0);
@@ -32,24 +48,105 @@ export function HomePage() {
   const [minRating, setMinRating] = useState(0);
   const [showFilters, setShowFilters] = useState(false);
 
+  // ─── Estado: 100% desde la base de datos ──────────────────────────────────
+  const [products, setProducts] = useState<Product[]>([]);
+  const [categories, setCategories] = useState<
+    { id: string; name: string; tipo: string; icon: string }[]
+  >([]);
+  const [isLoadingProducts, setIsLoadingProducts] = useState(true);
+  const [isLoadingCategories, setIsLoadingCategories] = useState(true);
+
   const categoryFilter = searchParams.get("categoria");
   const searchFilter = searchParams.get("buscar");
 
+  // ─── Cargar categorías del backend ────────────────────────────────────────
+  useEffect(() => {
+    setIsLoadingCategories(true);
+    getCategoriasApi()
+      .then((cats) => {
+        const withIcons = cats.map((c) => ({
+          ...c,
+          icon: categoryIcons[c.name.toLowerCase()] ?? "🏷️",
+        }));
+        setCategories(withIcons);
+      })
+      .catch(() => {
+        setCategories([]);
+      })
+      .finally(() => setIsLoadingCategories(false));
+  }, []);
+
+  // ─── Cargar productos del backend ─────────────────────────────────────────
+  useEffect(() => {
+    // Si tenemos un filtro de categoría numérico, cargar esa categoría
+    if (categoryFilter) {
+      const catId = Number(categoryFilter);
+      if (!isNaN(catId) && catId > 0) {
+        setIsLoadingProducts(true);
+        const filtros = {
+          q: searchFilter ?? undefined,
+          precio_min: priceRange[0] > 0 ? priceRange[0] : undefined,
+          precio_max: priceRange[1] < 2000 ? priceRange[1] : undefined,
+          calificacion_min: minRating > 0 ? minRating : undefined,
+          ordenar:
+            sortBy === "precio-asc" ? "precio_menor"
+            : sortBy === "precio-desc" ? "precio_mayor"
+            : sortBy === "rating" ? "mejor_calificados"
+            : sortBy === "nombre" ? "nombre_az"
+            : "mejor_calificados",
+        };
+        Promise.all([
+          getProductosPorCategoriaApi(catId, filtros).catch(() => []),
+          getServiciosPorCategoriaApi(catId, filtros).catch(() => []),
+        ])
+          .then(([prods, servs]) => setProducts([...prods, ...servs]))
+          .finally(() => setIsLoadingProducts(false));
+        return;
+      }
+    }
+
+    // Sin filtro: cargar todos los productos de TODAS las categorías
+    if (categories.length > 0) {
+      setIsLoadingProducts(true);
+      const promises = categories.map((cat) => {
+        const catId = Number(cat.id);
+        if (isNaN(catId)) return Promise.resolve([]);
+        return Promise.all([
+          getProductosPorCategoriaApi(catId).catch(() => []),
+          getServiciosPorCategoriaApi(catId).catch(() => []),
+        ]).then(([p, s]) => [...p, ...s]);
+      });
+
+      Promise.all(promises)
+        .then((results) => {
+          const allProducts = results.flat();
+          // Eliminar duplicados por ID
+          const unique = Array.from(new Map(allProducts.map((p) => [p.id, p])).values());
+          setProducts(unique);
+        })
+        .finally(() => setIsLoadingProducts(false));
+    } else if (!isLoadingCategories) {
+      // No hay categorías → no hay productos
+      setProducts([]);
+      setIsLoadingProducts(false);
+    }
+  }, [categoryFilter, searchFilter, sortBy, priceRange, minRating, categories, isLoadingCategories]);
+
+  // ─── Filtrado y ordenado local ────────────────────────────────────────────
   const filteredProducts = useMemo(() => {
     let result = [...products];
 
-    if (categoryFilter) {
-      result = result.filter((p) => p.category === categoryFilter);
-    }
-    if (searchFilter) {
+    // Si hay búsqueda por texto y no se envió al backend
+    if (searchFilter && !categoryFilter) {
       const q = searchFilter.toLowerCase();
       result = result.filter(
         (p) =>
           p.name.toLowerCase().includes(q) ||
-          p.description.toLowerCase().includes(q) ||
-          p.category.toLowerCase().includes(q)
+          p.description.toLowerCase().includes(q)
       );
     }
+
+    // Filtros de precio y rating
     result = result.filter(
       (p) => p.price >= priceRange[0] && p.price <= priceRange[1]
     );
@@ -57,6 +154,7 @@ export function HomePage() {
       result = result.filter((p) => p.rating >= minRating);
     }
 
+    // Ordenar
     switch (sortBy) {
       case "precio-asc":
         result.sort((a, b) => a.price - b.price);
@@ -74,11 +172,11 @@ export function HomePage() {
         result.sort((a, b) => b.reviewCount - a.reviewCount);
     }
     return result;
-  }, [categoryFilter, searchFilter, sortBy, priceRange, minRating]);
+  }, [products, searchFilter, categoryFilter, sortBy, priceRange, minRating]);
 
   const topRated = useMemo(
     () => [...products].sort((a, b) => b.rating - a.rating).slice(0, 4),
-    []
+    [products]
   );
 
   return (
@@ -113,7 +211,7 @@ export function HomePage() {
                     {banner.subtitle}
                   </p>
                   <Link
-                    to="/?categoria=cumpleanos"
+                    to="/"
                     className="inline-block mt-6 bg-amber-400 text-[#022C22] px-8 py-3 rounded-lg hover:bg-amber-300 transition-colors"
                     style={{ fontSize: 16, fontWeight: 600 }}
                   >
@@ -149,36 +247,48 @@ export function HomePage() {
         </section>
       )}
 
-      {/* Categories */}
+      {/* Categories — SOLO si hay categorías en la BD */}
       {!categoryFilter && !searchFilter && (
         <section className="max-w-7xl mx-auto px-4 py-8">
           <h2 className="mb-6" style={{ fontSize: 22, fontWeight: 600 }}>
             Buscar por Categoria
           </h2>
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
-            {categories.map((cat) => (
-              <Link
-                key={cat.id}
-                to={`/?categoria=${cat.id}`}
-                className="bg-white rounded-xl border border-border p-4 text-center hover:shadow-md hover:border-primary/30 transition-all group"
-              >
-                <div style={{ fontSize: 32 }} className="mb-2">
-                  {cat.icon}
-                </div>
-                <p
-                  className="text-muted-foreground group-hover:text-primary transition-colors"
-                  style={{ fontSize: 13, fontWeight: 500 }}
+          {isLoadingCategories ? (
+            <div className="flex justify-center py-8">
+              <Loader2 className="animate-spin text-primary" size={32} />
+            </div>
+          ) : categories.length === 0 ? (
+            <div className="text-center py-8">
+              <p className="text-muted-foreground" style={{ fontSize: 14 }}>
+                No hay categorias registradas en la base de datos
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
+              {categories.map((cat) => (
+                <Link
+                  key={cat.id}
+                  to={`/?categoria=${cat.id}`}
+                  className="bg-white rounded-xl border border-border p-4 text-center hover:shadow-md hover:border-primary/30 transition-all group"
                 >
-                  {cat.name}
-                </p>
-              </Link>
-            ))}
-          </div>
+                  <div style={{ fontSize: 32 }} className="mb-2">
+                    {cat.icon}
+                  </div>
+                  <p
+                    className="text-muted-foreground group-hover:text-primary transition-colors"
+                    style={{ fontSize: 13, fontWeight: 500 }}
+                  >
+                    {cat.name}
+                  </p>
+                </Link>
+              ))}
+            </div>
+          )}
         </section>
       )}
 
-      {/* Top rated - only on home */}
-      {!categoryFilter && !searchFilter && (
+      {/* Top rated — SOLO si hay productos en la BD */}
+      {!categoryFilter && !searchFilter && topRated.length > 0 && (
         <section className="max-w-7xl mx-auto px-4 pb-8">
           <h2 className="mb-6" style={{ fontSize: 22, fontWeight: 600 }}>
             Mejor Calificados
@@ -297,14 +407,15 @@ export function HomePage() {
           </div>
         )}
 
-        {filteredProducts.length === 0 ? (
+        {isLoadingProducts ? (
+          <div className="flex justify-center py-20">
+            <Loader2 className="animate-spin text-primary" size={40} />
+          </div>
+        ) : filteredProducts.length === 0 ? (
           <div className="text-center py-20">
             <p className="text-muted-foreground" style={{ fontSize: 18 }}>
-              No se encontraron productos
+              No hay productos registrados en la base de datos
             </p>
-            <Link to="/" className="text-primary hover:underline mt-2 inline-block" style={{ fontSize: 14 }}>
-              Ver todos los productos
-            </Link>
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">

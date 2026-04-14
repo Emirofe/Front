@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router";
 import {
   Search,
@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { useStore } from "../../context/store-context";
 import { products } from "../../data/mock-data";
+import { getCategoriasApi } from "../../api/api-client";
 
 export function Navbar() {
   const { currentUser, isLoggedIn, logout, getCartCount, wishlist } = useStore();
@@ -23,6 +24,13 @@ export function Navbar() {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [categories, setCategories] = useState<{ id: string; name: string }[]>([]);
+
+  useEffect(() => {
+    getCategoriasApi()
+      .then((cats) => setCategories(cats))
+      .catch(() => setCategories([]));
+  }, []);
   const navigate = useNavigate();
   const cartCount = getCartCount();
 
@@ -243,23 +251,14 @@ export function Navbar() {
           >
             Todos
           </Link>
-          {[
-            "Cumpleanos",
-            "Bodas",
-            "Baby Shower",
-            "Graduacion",
-            "Halloween",
-            "Navidad",
-            "XV Anos",
-            "Fiestas Infantiles",
-          ].map((cat) => (
+          {categories.map((cat) => (
             <Link
-              key={cat}
-              to={`/?categoria=${cat.toLowerCase().replace(/ /g, "-")}`}
+              key={cat.id}
+              to={`/?categoria=${cat.id}`}
               className="px-3 py-2 whitespace-nowrap hover:bg-white/10 rounded transition-colors"
               style={{ fontSize: 13 }}
             >
-              {cat}
+              {cat.name}
             </Link>
           ))}
         </div>
